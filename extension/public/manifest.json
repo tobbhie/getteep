@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "Teep",
+  "version": "0.1.0",
+  "description": "Tip anyone and earn tips on X instantly.",
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://x.com/*",
+    "https://twitter.com/*",
+    "https://api.developer.coinbase.com/*",
+    "https://*.g.alchemy.com/*",
+    "https://auth.privy.io/*",
+    "https://*.privy.io/*",
+    "http://localhost:3001/*",
+    "http://127.0.0.1:3001/*"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src 'self' https: wss: http://localhost:3001 http://127.0.0.1:3001;"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://x.com/*", "https://twitter.com/*"],
+      "js": ["content.js"],
+      "css": [],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Teep"
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["popup.html"],
+      "matches": ["https://x.com/*", "https://twitter.com/*"]
+    }
+  ]
+}

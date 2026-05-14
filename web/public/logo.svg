@@ -1,0 +1,12 @@
+<svg fill="none" height="240" viewBox="0 0 100 100" width="240" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<linearGradient id="logoGradientHero" x1="0%" x2="100%" y1="0%" y2="100%">
+<stop offset="0%" stop-color="#6324EB"></stop>
+<stop offset="100%" stop-color="#6324EB"></stop>
+</linearGradient>
+</defs>
+<path class="transition-all duration-500 hover:opacity-80" d="M10 25H45V65H25V55H35V35H20V75H45" stroke="url(#logoGradientHero)" stroke-linecap="round" stroke-linejoin="round" stroke-width="6"></path>
+<path class="transition-all duration-500 hover:opacity-80" d="M90 25H55V65H75V55H65V35H80V75H55" stroke="url(#logoGradientHero)" stroke-linecap="round" stroke-linejoin="round" stroke-width="6"></path>
+<line stroke="url(#logoGradientHero)" stroke-linecap="round" stroke-width="2" x1="48" x2="48" y1="20" y2="80"></line>
+<line stroke="url(#logoGradientHero)" stroke-linecap="round" stroke-width="2" x1="52" x2="52" y1="20" y2="80"></line>
+</svg>

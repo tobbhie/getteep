@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+contracts/artifacts/
+contracts/cache/
+contracts/typechain-types/
+.hardhat-appdata/
+.hardhat-localappdata/
+.npm-cache/
+
+# Environment
+.env
+.env.local
+.env.*
+!.env.example
+
+# Database
+backend/data/
+*.db
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Deployed addresses (may contain sensitive info)
+contracts/deployed-addresses.json
+
+# Logs
+*.log
+npm-debug.log*
+
+# Generated wallet / gas sponsorship artifacts
+gasstation/output/
+
+# Research/scratch docs are intentionally private.
+# Production/operator docs live in project-docs/ and should be versioned.
+docs/
+ui/

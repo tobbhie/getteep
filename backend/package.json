@@ -1,0 +1,33 @@
+{
+  "name": "@teep/backend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "clean": "node scripts/clean-dist.js",
+    "build": "npm run clean && tsc",
+    "start": "node dist/index.js",
+    "db:migrate": "ts-node src/db/migrate.ts"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "cors": "^2.8.5",
+    "helmet": "^8.0.0",
+    "better-sqlite3": "^11.7.0",
+    "viem": "^2.21.0",
+    "dotenv": "^16.4.0",
+    "ethers": "^6.13.0",
+    "jsonwebtoken": "^9.0.0",
+    "express-rate-limit": "^7.4.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/cors": "^2.8.17",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0",
+    "ts-node": "^10.9.0",
+    "ts-node-dev": "^2.0.0"
+  }
+}

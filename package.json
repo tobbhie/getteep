@@ -1,0 +1,43 @@
+{
+  "name": "teep",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Non-custodial X post tipping on Arc with USDC",
+  "workspaces": ["contracts", "backend", "extension", "web", "shared"],
+  "scripts": {
+    "contracts:compile": "npm run compile --workspace=contracts",
+    "contracts:test": "npm run test --workspace=contracts",
+    "contracts:deploy": "npm run deploy --workspace=contracts",
+    "contracts:deploy:arc-testnet": "npm run deploy:arc-testnet --workspace=contracts",
+    "contracts:deploy:defi:arc-testnet": "npm run deploy:defi:arc-testnet --workspace=contracts",
+    "contracts:deploy:base-sepolia": "npm run deploy:base-sepolia --workspace=contracts",
+    "contracts:deploy:mainnet": "npm run deploy:mainnet --workspace=contracts",
+    "backend:dev": "npm run dev --workspace=backend",
+    "backend:build": "npm run build --workspace=backend",
+    "extension:dev": "npm run dev --workspace=extension",
+    "extension:build": "npm run build --workspace=extension",
+    "extension:build:prod": "npm run build:prod --workspace=extension",
+    "extension:build:dev": "npm run build:dev --workspace=extension",
+    "extension:build:debug": "npm run build:debug --workspace=extension",
+    "extension:build:demo": "npm run build:demo --workspace=extension",
+    "web:dev": "npm run dev --workspace=web",
+    "web:build": "npm run build --workspace=web",
+    "web:build:prod": "npm run build:prod --workspace=web",
+    "security:audit:runtime": "npm audit --omit=dev --audit-level=high --workspaces"
+  },
+  "dependencies": {
+    "permissionless": "^0.2.57"
+  },
+  "overrides": {
+    "axios": "^1.16.0",
+    "bn.js": "^5.2.3",
+    "defu": "^6.1.7",
+    "follow-redirects": "^1.16.0",
+    "h3": "^1.15.11",
+    "hono": "^4.12.18",
+    "lodash": "^4.18.1",
+    "path-to-regexp": "0.1.13",
+    "qs": "^6.15.1",
+    "socket.io-parser": "^4.2.6"
+  }
+}
