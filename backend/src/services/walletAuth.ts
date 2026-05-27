@@ -1,7 +1,8 @@
 import crypto from "crypto";
 import { ethers } from "ethers";
+import type { Address, Hex } from "viem";
 import { isAddress } from "../utils/security";
-import { getRpcUrl } from "../config/chain";
+import { createBackendPublicClient } from "./rpcClient";
 
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
@@ -10,6 +11,9 @@ const allowedPurposes = new Set([
   "referral-code",
   "referral-link",
   "referral-set-referrer",
+  "account-settings",
+  "activity-write",
+  "supporter-thank",
   "withdrawal",
 ]);
 
@@ -113,20 +117,29 @@ async function verifySignature(address: string, message: string, signature: stri
     // Smart-account signatures may not be recoverable as EOAs.
   }
 
-  const rpcUrl = getRpcUrl();
-  if (!rpcUrl) return false;
-
   try {
-    const provider = new ethers.JsonRpcProvider(rpcUrl);
-    const code = await provider.getCode(address);
+    const client = createBackendPublicClient();
+    const contractAddress = address as Address;
+    const code = await client.getCode({ address: contractAddress });
     if (!code || code === "0x") return false;
 
-    const wallet = new ethers.Contract(
-      address,
-      ["function isValidSignature(bytes32 hash, bytes signature) view returns (bytes4)"],
-      provider
-    );
-    const magicValue = await wallet.isValidSignature(ethers.hashMessage(message), signature);
+    const magicValue = await client.readContract({
+      address: contractAddress,
+      abi: [
+        {
+          name: "isValidSignature",
+          type: "function",
+          stateMutability: "view",
+          inputs: [
+            { name: "hash", type: "bytes32" },
+            { name: "signature", type: "bytes" },
+          ],
+          outputs: [{ name: "magicValue", type: "bytes4" }],
+        },
+      ],
+      functionName: "isValidSignature",
+      args: [ethers.hashMessage(message) as Hex, signature as Hex],
+    });
     return String(magicValue).toLowerCase() === "0x1626ba7e";
   } catch {
     return false;

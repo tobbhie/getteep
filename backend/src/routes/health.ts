@@ -1,8 +1,8 @@
 import { Router, Request, Response } from "express";
-import { createPublicClient, http } from "viem";
 import { getDb } from "../db/database";
-import { getConfiguredChain, getRpcUrl } from "../config/chain";
+import { getRpcUrl } from "../config/chain";
 import { summarizeOpenAbuseEvents } from "../services/abuse";
+import { createBackendPublicClient } from "../services/rpcClient";
 
 const router = Router();
 const INDEXER_MAX_LAG_BLOCKS = Number(process.env.INDEXER_MAX_LAG_BLOCKS || 50);
@@ -38,7 +38,7 @@ router.get("/", async (_req: Request, res: Response) => {
     try {
       const rpcUrl = getRpcUrl();
       if (rpcUrl) {
-        const client = createPublicClient({ chain: getConfiguredChain(), transport: http(rpcUrl, { timeout: 8_000 }) });
+        const client = createBackendPublicClient({ url: rpcUrl, timeoutMs: 8_000 });
         rpcBlock = (await client.getBlockNumber()).toString();
       }
     } catch {}

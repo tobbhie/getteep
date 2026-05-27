@@ -142,20 +142,6 @@ export default function RechargePrompt({
                   {walletAddress ? (
                     <button
                       type="button"
-                      onClick={handleCopyAddress}
-                      className={`recharge-funding-item recharge-funding-item--btn ${depositCopyFeedback ? "recharge-funding-item--copied" : ""}`}
-                      role="menuitem"
-                    >
-                      {depositCopyFeedback ? "Copied. Send USDC to this address" : fundingPolicy.providers.cryptoReceive.label}
-                    </button>
-                  ) : (
-                    <Link to="/dashboard" className="recharge-funding-item" role="menuitem" onClick={onClose}>
-                      Deposit from wallet (set up in Dashboard)
-                    </Link>
-                  )}
-                  {walletAddress ? (
-                    <button
-                      type="button"
                       onClick={() => { handleFaucet(); setFundingDropdownOpen(false); }}
                       disabled={faucetLoading || !fundingPolicy.providers.faucet.enabled}
                       className="recharge-funding-item recharge-funding-item--btn"
@@ -169,12 +155,26 @@ export default function RechargePrompt({
                       Get test funds from faucet - set up wallet in Dashboard first
                     </Link>
                   )}
+                  {walletAddress ? (
+                    <button
+                      type="button"
+                      onClick={handleCopyAddress}
+                      className={`recharge-funding-item recharge-funding-item--btn ${depositCopyFeedback ? "recharge-funding-item--copied" : ""}`}
+                      role="menuitem"
+                    >
+                      {depositCopyFeedback ? "Copied. Send to this address" : fundingPolicy.providers.cryptoReceive.label}
+                    </button>
+                  ) : (
+                    <Link to="/dashboard" className="recharge-funding-item" role="menuitem" onClick={onClose}>
+                      Receive from wallet (set up in Dashboard)
+                    </Link>
+                  )}
                 </div>
               )}
             </div>
             {depositCopyFeedback && (
               <p className="recharge-copy-toast" role="status" aria-live="polite">
-                Address copied to clipboard. Paste it in your wallet to send USDC.
+                Address copied to clipboard. Paste it in your wallet to send supported funds.
               </p>
             )}
             <p className="recharge-faucet-msg" style={{ color: "var(--text-muted)" }}>

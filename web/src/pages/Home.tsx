@@ -582,24 +582,22 @@ export default function Home() {
         </div>
       </section>
 
-      {stats && (
-        <section className="landing-stats-v2" id="stats">
-          <div className="landing-stats-grid">
-            <div className="landing-stat-v2">
-              <p className="landing-stat-value-v2">${stats.totalVolumeUsd}+</p>
-              <p className="landing-stat-label-v2">Total Tips Sent</p>
-            </div>
-            <div className="landing-stat-v2">
-              <p className="landing-stat-value-v2 landing-stat-primary">{stats.distinctTippers.toLocaleString()}+</p>
-              <p className="landing-stat-label-v2">Active Tippers</p>
-            </div>
-            <div className="landing-stat-v2">
-              <p className="landing-stat-value-v2 landing-stat-success">{stats.verifiedCreators.toLocaleString()}+</p>
-              <p className="landing-stat-label-v2">Verified Creators</p>
-            </div>
+      <section className={`landing-stats-v2 ${stats ? "" : "landing-stats-v2--loading"}`} id="stats">
+        <div className="landing-stats-grid">
+          <div className="landing-stat-v2">
+            <p className="landing-stat-value-v2">{stats ? `$${stats.totalVolumeUsd}+` : "-"}</p>
+            <p className="landing-stat-label-v2">Total Tips Sent</p>
           </div>
-        </section>
-      )}
+          <div className="landing-stat-v2">
+            <p className="landing-stat-value-v2 landing-stat-primary">{stats ? `${stats.distinctTippers.toLocaleString()}+` : "-"}</p>
+            <p className="landing-stat-label-v2">Active Tippers</p>
+          </div>
+          <div className="landing-stat-v2">
+            <p className="landing-stat-value-v2 landing-stat-success">{stats ? `${stats.verifiedCreators.toLocaleString()}+` : "-"}</p>
+            <p className="landing-stat-label-v2">Verified Creators</p>
+          </div>
+        </div>
+      </section>
 
       <section className="landing-how-v2" id="how-it-works">
         <div className="landing-how-v2-header">

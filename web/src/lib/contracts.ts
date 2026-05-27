@@ -79,6 +79,10 @@ export function handleToAuthorId(handle: string): bigint {
   return BigInt(keccak256(toBytes(handle.toLowerCase())));
 }
 
+export function computeDirectCreatorContentId(authorId: string): `0x${string}` {
+  return keccak256(toBytes(`teep:direct:x:${authorId}`));
+}
+
 const TIP_ABI = [
   { name: "tip", type: "function", stateMutability: "nonpayable", inputs: [{ name: "contentId", type: "bytes32" }, { name: "authorId", type: "uint256" }, { name: "amount", type: "uint256" }], outputs: [] },
 ] as const;

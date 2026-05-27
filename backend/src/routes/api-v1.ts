@@ -1,15 +1,23 @@
 import { Router, Request, Response } from "express";
+import https from "https";
 import { getDb } from "../db/database";
-import { keccak256, toBytes } from "viem";
-import { createPublicClient, http } from "viem";
-import { ARC_TESTNET_USDC, getConfiguredChain, getRpcUrl } from "../config/chain";
+import { formatUnits, keccak256, toBytes } from "viem";
+import { ARC_TESTNET_USDC, getRpcUrl } from "../config/chain";
 import { getUnifiedTipperStats } from "../services/tipperStats";
+import { createBackendPublicClient } from "../services/rpcClient";
+import { isAddress } from "../utils/security";
+import { getUserSettings, settingsRowToResponse } from "../services/userSettings";
+import { createLowBalanceNotification, createThankYouMessageNotification } from "../services/notifications";
+import { syncInboundUsdcFunding } from "../services/fundingSync";
+import { verifyWalletProof } from "../services/walletAuth";
+import { getCreatorPerformance } from "../services/creatorPerformance";
 
 const router = Router();
 
-const CHAIN = getConfiguredChain();
 const RPC_URL = getRpcUrl();
 const USDC_ADDRESS = (process.env.MOCK_USDC_ADDRESS || process.env.USDC_ADDRESS || ARC_TESTNET_USDC) as `0x${string}`;
+const ALLOW_INSECURE_OEMBED_TLS = process.env.ALLOW_INSECURE_OEMBED_TLS === "true" && process.env.NODE_ENV !== "production";
+let warnedInsecureOembedTls = false;
 
 const ERC20_ABI = [
   {
@@ -26,20 +34,17 @@ function contentIdFromPost(handle: string, tweetId: string): string {
   return keccak256(toBytes(canonical));
 }
 
-/** On-chain authorId = keccak256(handle). Legacy DB may have X profile.id (19 digits). */
+/** On-chain authorId is X's stable numeric user ID. Legacy DBs may still contain hash-derived IDs. */
 function resolveAuthorId(db: ReturnType<typeof getDb>, ownerAddress: string): string | null {
   const claim = db
-    .prepare("SELECT author_id, username FROM verified_claims WHERE owner_address = ? LIMIT 1")
+    .prepare("SELECT author_id, username FROM verified_claims WHERE owner_address = ? ORDER BY verified_at DESC LIMIT 1")
     .get(ownerAddress) as { author_id: string; username: string } | undefined;
   if (!claim) return null;
-  if (claim.author_id.length >= 50) return claim.author_id; // Already correct (keccak256 decimal)
-  const correct = BigInt(keccak256(toBytes(claim.username.toLowerCase()))).toString();
-  try {
-    db.prepare("UPDATE verified_claims SET author_id = ? WHERE owner_address = ?").run(correct, ownerAddress);
-  } catch {
-    /* ignore */
-  }
-  return correct;
+  return claim.author_id;
+}
+
+function creatorTipPredicate(alias = "t"): string {
+  return `(${alias}.author_id = ? OR LOWER(COALESCE(m.author_handle, '')) = LOWER(?))`;
 }
 
 /** Standard error response */
@@ -47,7 +52,602 @@ function err(res: Response, status: number, message: string, code?: string) {
   res.status(status).json({ error: message, ...(code && { code }) });
 }
 
+function normalizeTeepUsername(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().replace(/^@/, "").toLowerCase();
+  if (!/^[a-z0-9_]{3,24}$/.test(normalized)) return null;
+  if (/^_+$/.test(normalized)) return null;
+  return normalized;
+}
+
+function normalizeSocialXHandle(value: unknown): string | null {
+  if (value == null || value === "") return null;
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().replace(/^@/, "").toLowerCase();
+  if (!normalized) return null;
+  if (!/^[a-z0-9_]{1,15}$/.test(normalized)) return null;
+  if (/^_+$/.test(normalized)) return null;
+  return normalized;
+}
+
+function normalizeTipAmount(value: unknown): string | null {
+  const raw = typeof value === "number" ? String(value) : typeof value === "string" ? value.trim().replace(/^\$/, "") : "";
+  if (!raw) return null;
+  const amount = Number(raw);
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 10000) return null;
+  return amount.toFixed(2);
+}
+
+function boolInt(value: unknown, fallback = true): number {
+  if (typeof value === "boolean") return value ? 1 : 0;
+  if (value === 0 || value === 1) return value;
+  return fallback ? 1 : 0;
+}
+
+function safeJson(value: string | null | undefined) {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function rawToUsd(raw: number | string | null | undefined): string {
+  const value = Number(raw || 0);
+  if (!Number.isFinite(value)) return "0.00";
+  return (value / 1e6).toFixed(2);
+}
+
+function timeAgoFromUnix(timestamp: number | null | undefined): string {
+  if (!timestamp) return "No tips yet";
+  const seconds = Math.max(0, Math.floor(Date.now() / 1000) - timestamp);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} day${days === 1 ? "" : "s"} ago`;
+  const months = Math.floor(days / 30);
+  return `${months} month${months === 1 ? "" : "s"} ago`;
+}
+
+async function getAccountBalances(address: string) {
+  const balances: Array<{ key: string; label: string; raw: string; decimals: number; display: string }> = [];
+  const client = createBackendPublicClient({ url: RPC_URL });
+
+  const nativeRaw = await client.getBalance({ address: address as `0x${string}` });
+  balances.push({
+    key: "arc_native_usdc",
+    label: "Arc USDC balance",
+    raw: nativeRaw.toString(),
+    decimals: 18,
+    display: formatUnits(nativeRaw, 18),
+  });
+
+  if (USDC_ADDRESS && USDC_ADDRESS.toLowerCase() !== "0x0000000000000000000000000000000000000000") {
+    const erc20Raw = await client.readContract({
+      address: USDC_ADDRESS,
+      abi: ERC20_ABI,
+      functionName: "balanceOf",
+      args: [address as `0x${string}`],
+    });
+    balances.push({
+      key: "arc_token_usdc",
+      label: "Arc token USDC balance",
+      raw: erc20Raw.toString(),
+      decimals: 6,
+      display: formatUnits(erc20Raw, 6),
+    });
+  }
+
+  return balances;
+}
+
+async function getDeleteReadiness(address: string) {
+  const balances = await getAccountBalances(address);
+  const blockingBalances = balances.filter((balance) => BigInt(balance.raw) > 0n);
+  return {
+    address,
+    canDelete: blockingBalances.length === 0,
+    balances,
+    blockingBalances,
+  };
+}
+
+async function deletePrivyUser(userId: string) {
+  const appId = process.env.PRIVY_APP_ID || process.env.VITE_PRIVY_APP_ID || "";
+  const appSecret = process.env.PRIVY_APP_SECRET || "";
+  if (!appId || !appSecret) {
+    return {
+      ok: false,
+      status: 501,
+      message: "Privy account deletion is not configured. Set PRIVY_APP_ID and PRIVY_APP_SECRET on the backend.",
+    };
+  }
+  if (!/^did:privy:[a-zA-Z0-9_-]+$/.test(userId)) {
+    return { ok: false, status: 400, message: "Invalid Privy user id" };
+  }
+
+  const auth = Buffer.from(`${appId}:${appSecret}`).toString("base64");
+  const response = await fetch(`https://auth.privy.io/api/v1/users/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Basic ${auth}`,
+      "privy-app-id": appId,
+    },
+  });
+  if (response.ok) return { ok: true, status: response.status, message: "" };
+  const payload = await response.json().catch(() => null);
+  return {
+    ok: false,
+    status: response.status,
+    message: payload?.message || payload?.error || "Privy account deletion failed",
+  };
+}
+
+router.get("/wallet/:address/settings", (req: Request, res: Response) => {
+  const address = String(req.params.address || "").toLowerCase();
+  if (!isAddress(address)) {
+    err(res, 400, "Invalid account address");
+    return;
+  }
+
+  const db = getDb();
+  const settings = db
+    .prepare("SELECT *, updated_at as updatedAt FROM user_settings WHERE address = ? LIMIT 1")
+    .get(address) as any | undefined;
+
+  res.set("Cache-Control", "private, no-store");
+  res.json(settingsRowToResponse(address, settings));
+});
+
+router.post("/wallet/:address/settings", async (req: Request, res: Response) => {
+  const address = String(req.params.address || "").toLowerCase();
+  if (!isAddress(address)) {
+    err(res, 400, "Invalid account address");
+    return;
+  }
+
+  const username = normalizeTeepUsername(req.body?.username);
+  if (!username) {
+    err(res, 400, "Username must be 3-24 characters using letters, numbers, or underscores");
+    return;
+  }
+  const defaultTipAmount = normalizeTipAmount(req.body?.defaultTipAmount);
+  if (!defaultTipAmount) {
+    err(res, 400, "Default tip amount must be greater than zero");
+    return;
+  }
+  const socialXHandle = normalizeSocialXHandle(req.body?.socialXHandle ?? req.body?.social?.xHandle);
+  if ((req.body?.socialXHandle || req.body?.social?.xHandle) && !socialXHandle) {
+    err(res, 400, "X handle must be 1-15 characters using letters, numbers, or underscores");
+    return;
+  }
+
+  const db = getDb();
+  const existing = db
+    .prepare("SELECT address FROM user_settings WHERE username = ? AND address <> ? LIMIT 1")
+    .get(username, address) as { address: string } | undefined;
+  if (existing) {
+    err(res, 409, "Username is already taken", "USERNAME_TAKEN");
+    return;
+  }
+
+  db.prepare(
+    `INSERT INTO user_settings (
+      address, username, social_x_handle, default_tip_amount,
+      receipt_share_links_enabled, receipt_share_amount_enabled, receipt_post_aware_copy_enabled,
+      notify_creator_claimed, notify_low_balance, notify_receipt_ready,
+      privacy_hide_address, privacy_private_activity, privacy_require_verification,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(address) DO UPDATE SET
+      username = excluded.username,
+      social_x_handle = excluded.social_x_handle,
+      default_tip_amount = excluded.default_tip_amount,
+      receipt_share_links_enabled = excluded.receipt_share_links_enabled,
+      receipt_share_amount_enabled = excluded.receipt_share_amount_enabled,
+      receipt_post_aware_copy_enabled = excluded.receipt_post_aware_copy_enabled,
+      notify_creator_claimed = excluded.notify_creator_claimed,
+      notify_low_balance = excluded.notify_low_balance,
+      notify_receipt_ready = excluded.notify_receipt_ready,
+      privacy_hide_address = excluded.privacy_hide_address,
+      privacy_private_activity = excluded.privacy_private_activity,
+      privacy_require_verification = excluded.privacy_require_verification,
+      updated_at = datetime('now')`
+  ).run(
+    address,
+    username,
+    socialXHandle,
+    defaultTipAmount,
+    1,
+    boolInt(req.body?.receipts?.shareAmountEnabled, true),
+    1,
+    boolInt(req.body?.notifications?.creatorClaimed, true),
+    boolInt(req.body?.notifications?.lowBalance, true),
+    boolInt(req.body?.notifications?.receiptReady, false),
+    boolInt(req.body?.privacy?.hideAddress, true),
+    boolInt(req.body?.privacy?.privateActivity, true),
+    boolInt(req.body?.privacy?.requireVerification, true)
+  );
+
+  const saved = db
+    .prepare("SELECT *, updated_at as updatedAt FROM user_settings WHERE address = ? LIMIT 1")
+    .get(address);
+
+  res.set("Cache-Control", "private, no-store");
+  res.json(settingsRowToResponse(address, saved));
+});
+
+router.post("/wallet/:address/social-profile", async (req: Request, res: Response) => {
+  const address = String(req.params.address || "").toLowerCase();
+  if (!isAddress(address)) {
+    err(res, 400, "Invalid account address");
+    return;
+  }
+
+  const verified = await verifyWalletProof(address, "account-settings", req.body?.walletProof);
+  if (!verified) {
+    err(res, 401, "Account verification failed");
+    return;
+  }
+
+  const socialXHandle = normalizeSocialXHandle(req.body?.socialXHandle ?? req.body?.social?.xHandle);
+  if ((req.body?.socialXHandle || req.body?.social?.xHandle) && !socialXHandle) {
+    err(res, 400, "X handle must be 1-15 characters using letters, numbers, or underscores");
+    return;
+  }
+
+  const db = getDb();
+  db.prepare(
+    `INSERT INTO user_settings (address, social_x_handle, updated_at)
+     VALUES (?, ?, datetime('now'))
+     ON CONFLICT(address) DO UPDATE SET
+       social_x_handle = excluded.social_x_handle,
+       updated_at = datetime('now')`
+  ).run(address, socialXHandle);
+
+  const saved = db
+    .prepare("SELECT *, updated_at as updatedAt FROM user_settings WHERE address = ? LIMIT 1")
+    .get(address);
+
+  res.set("Cache-Control", "private, no-store");
+  res.json(settingsRowToResponse(address, saved));
+});
+
+router.get("/wallet/:address/tipper-settings-public", (req: Request, res: Response) => {
+  const address = String(req.params.address || "").toLowerCase();
+  if (!isAddress(address)) {
+    err(res, 400, "Invalid account address");
+    return;
+  }
+  const settings = getUserSettings(address);
+  res.set("Cache-Control", "private, max-age=60");
+  res.json({
+    address,
+    publicIdentity: {
+      label: settings.username ? `@${settings.username}` : settings.privacy.hideAddress ? `${address.slice(0, 6)}...${address.slice(-4)}` : address,
+      socialXHandle: settings.socialXHandle,
+      address: settings.privacy.hideAddress ? null : address,
+    },
+    defaultTipAmount: settings.defaultTipAmount,
+    receipts: settings.receipts,
+    privacy: settings.privacy,
+  });
+});
+
+router.get("/wallet/:address/funding-history", async (req: Request, res: Response) => {
+  const address = String(req.params.address || "").toLowerCase();
+  if (!isAddress(address)) {
+    err(res, 400, "Invalid account address");
+    return;
+  }
+  const page = Math.max(1, Number(req.query.page || 1) || 1);
+  const limit = Math.min(7, Math.max(1, Number(req.query.limit || 7) || 7));
+  const day = typeof req.query.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(req.query.day) ? req.query.day : "";
+  const db = getDb();
+  const where = ["user_address = ?"];
+  const params: any[] = [address];
+  if (day) {
+    const start = new Date(`${day}T00:00:00.000Z`).getTime();
+    const end = start + 24 * 60 * 60 * 1000;
+    where.push("created_at >= ? AND created_at < ?");
+    params.push(start, end);
+  }
+  let syncState: { status: "synced" | "delayed"; message: string } = {
+    status: "synced",
+    message: "Latest funding activity checked.",
+  };
+  try {
+    await syncInboundUsdcFunding(address);
+  } catch (error) {
+    console.warn("[Funding Sync] Could not sync inbound funding transfers:", error instanceof Error ? error.message : error);
+    syncState = {
+      status: "delayed",
+      message: "Checking latest funding activity. Recent transfers may appear shortly.",
+    };
+  }
+  const whereSql = where.join(" AND ");
+  const total = db.prepare(`SELECT COUNT(*) as count FROM funding_provider_sessions WHERE ${whereSql}`).get(...params) as { count: number };
+  const rows = db
+    .prepare(`SELECT id, provider, kind, status, provider_session_id as providerSessionId, metadata_json as metadataJson, created_at as createdAt, updated_at as updatedAt FROM funding_provider_sessions WHERE ${whereSql} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
+    .all(...params, limit, (page - 1) * limit)
+    .map((row: any) => ({
+      ...row,
+      metadata: row.metadataJson ? JSON.parse(row.metadataJson) : null,
+      metadataJson: undefined,
+    }));
+  res.set("Cache-Control", "private, no-store");
+  res.json({ page, limit, total: total.count, records: rows, sync: syncState });
+});
+
+router.get("/wallet/:address/withdrawal-history", (req: Request, res: Response) => {
+  const address = String(req.params.address || "").toLowerCase();
+  if (!isAddress(address)) {
+    err(res, 400, "Invalid account address");
+    return;
+  }
+  const page = Math.max(1, Number(req.query.page || 1) || 1);
+  const limit = Math.min(7, Math.max(1, Number(req.query.limit || 7) || 7));
+  const day = typeof req.query.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(req.query.day) ? req.query.day : "";
+  const db = getDb();
+  const where = ["owner_address = ?"];
+  const params: any[] = [address];
+  if (day) {
+    const start = new Date(`${day}T00:00:00.000Z`).getTime();
+    const end = start + 24 * 60 * 60 * 1000;
+    where.push("created_at >= ? AND created_at < ?");
+    params.push(start, end);
+  }
+  const whereSql = where.join(" AND ");
+  const total = db.prepare(`SELECT COUNT(*) as count FROM withdrawal_records WHERE ${whereSql}`).get(...params) as { count: number };
+  const rows = db
+    .prepare(`SELECT destination_address as destinationAddress, source, amount_raw as amountRaw, tx_hash as txHash, created_at as createdAt FROM withdrawal_records WHERE ${whereSql} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
+    .all(...params, limit, (page - 1) * limit);
+  res.set("Cache-Control", "private, no-store");
+  res.json({ page, limit, total: total.count, records: rows });
+});
+
 // ─── GET /posts/:handle/:tweetId ─────────────────────────────────────────
+router.post("/wallet/:address/export", async (req: Request, res: Response) => {
+  const address = String(req.params.address || "").toLowerCase();
+  if (!isAddress(address)) {
+    err(res, 400, "Invalid account address");
+    return;
+  }
+  const verified = await verifyWalletProof(address, "account-settings", req.body?.walletProof);
+  if (!verified) {
+    err(res, 401, "Account verification failed");
+    return;
+  }
+
+  const db = getDb();
+  try {
+    await syncInboundUsdcFunding(address);
+  } catch (error) {
+    console.warn("[Account Export] Could not sync funding before export:", error instanceof Error ? error.message : error);
+  }
+
+  const settings = getUserSettings(address);
+  const tipsSent = db
+    .prepare(
+      `SELECT t.content_id as contentId, t.author_id as authorId, t.to_address as toAddress, t.amount, t.tx_hash as txHash,
+              t.timestamp, m.author_handle as authorHandle, m.tweet_id as tweetId, m.kind
+       FROM tips t
+       LEFT JOIN tip_metadata m ON t.content_id = m.content_id
+       WHERE LOWER(t.from_address) = ?
+       ORDER BY t.timestamp DESC`
+    )
+    .all(address);
+  const activity = db
+    .prepare(
+      `SELECT type, from_address as fromAddress, to_address as toAddress, amount, tx_hash as txHash, detail,
+              author_handle as authorHandle, tweet_id as tweetId, timestamp
+       FROM user_activity
+       WHERE LOWER(from_address) = ? OR LOWER(COALESCE(to_address, '')) = ?
+       ORDER BY timestamp DESC`
+    )
+    .all(address, address);
+  const funding = db
+    .prepare(
+      `SELECT id, provider, provider_session_id as providerSessionId, kind, status, metadata_json as metadataJson,
+              created_at as createdAt, updated_at as updatedAt
+       FROM funding_provider_sessions
+       WHERE LOWER(user_address) = ?
+       ORDER BY created_at DESC`
+    )
+    .all(address)
+    .map((row: any) => ({ ...row, metadata: safeJson(row.metadataJson), metadataJson: undefined }));
+  const withdrawals = db
+    .prepare(
+      `SELECT destination_address as destinationAddress, source, amount_raw as amountRaw, tx_hash as txHash,
+              confirmation_id as confirmationId, created_at as createdAt
+       FROM withdrawal_records
+       WHERE LOWER(owner_address) = ?
+       ORDER BY created_at DESC`
+    )
+    .all(address);
+  const withdrawalRequests = db
+    .prepare(
+      `SELECT id, destination_address as destinationAddress, source, amount_raw as amountRaw, email, status,
+              tx_hash as txHash, created_at as createdAt, expires_at as expiresAt, confirmed_at as confirmedAt, used_at as usedAt
+       FROM withdrawal_confirmations
+       WHERE LOWER(owner_address) = ?
+       ORDER BY created_at DESC`
+    )
+    .all(address);
+  const referralCode = db
+    .prepare("SELECT code, created_at as createdAt FROM referral_codes WHERE LOWER(referrer_address) = ? LIMIT 1")
+    .get(address);
+  const referralAttribution = db
+    .prepare("SELECT referrer_address as referrerAddress, referral_code as referralCode, referred_at as referredAt FROM user_referrals WHERE LOWER(user_address) = ? LIMIT 1")
+    .get(address);
+  const notifications = db
+    .prepare(
+      `SELECT id, type, title, body, status, metadata_json as metadataJson, created_at as createdAt
+       FROM user_notifications
+       WHERE LOWER(user_address) = ?
+       ORDER BY created_at DESC`
+    )
+    .all(address)
+    .map((row: any) => ({ ...row, metadata: safeJson(row.metadataJson), metadataJson: undefined }));
+  const creatorClaims = db
+    .prepare(
+      `SELECT author_id as authorId, username, display_name as displayName, profile_image_url as profileImageUrl, verified_at as verifiedAt
+       FROM verified_claims
+       WHERE LOWER(owner_address) = ?
+       ORDER BY verified_at DESC`
+    )
+    .all(address);
+
+  res.set("Cache-Control", "private, no-store");
+  res.set("Content-Disposition", `attachment; filename="teep-account-export-${address.slice(2, 8)}.json"`);
+  res.json({
+    exportedAt: new Date().toISOString(),
+    account: {
+      address,
+      username: settings.username,
+      publicIdentity: {
+        label: settings.username ? `@${settings.username}` : settings.privacy.hideAddress ? `${address.slice(0, 6)}...${address.slice(-4)}` : address,
+        address: settings.privacy.hideAddress ? null : address,
+      },
+    },
+    settings,
+    creatorClaims,
+    tipsSent,
+    activity,
+    funding,
+    withdrawals,
+    withdrawalRequests,
+    referrals: {
+      code: referralCode || null,
+      attribution: referralAttribution || null,
+    },
+    notifications,
+  });
+});
+
+router.get("/wallet/:address/delete-readiness", async (req: Request, res: Response) => {
+  const address = String(req.params.address || "").toLowerCase();
+  if (!isAddress(address)) {
+    err(res, 400, "Invalid account address");
+    return;
+  }
+  try {
+    res.set("Cache-Control", "private, no-store");
+    res.json(await getDeleteReadiness(address));
+  } catch (error) {
+    console.error("[Account Delete] Readiness check failed:", error);
+    err(res, 500, "Could not verify account balance before deletion");
+  }
+});
+
+router.post("/wallet/:address/delete-local-data", async (req: Request, res: Response) => {
+  const address = String(req.params.address || "").toLowerCase();
+  if (!isAddress(address)) {
+    err(res, 400, "Invalid account address");
+    return;
+  }
+  if (req.body?.confirmation !== "DELETE") {
+    err(res, 400, "Deletion confirmation is required");
+    return;
+  }
+  const userId = typeof req.body?.privyUserId === "string" ? req.body.privyUserId : "";
+  const verified = await verifyWalletProof(address, "account-settings", req.body?.walletProof);
+  if (!verified) {
+    err(res, 401, "Account verification failed");
+    return;
+  }
+
+  try {
+    const readiness = await getDeleteReadiness(address);
+    if (!readiness.canDelete) {
+      res.status(409).json({
+        error: "Transfer or withdraw your remaining balance before deleting your account.",
+        code: "POSITIVE_BALANCE",
+        ...readiness,
+      });
+      return;
+    }
+
+    const privyDeletion = await deletePrivyUser(userId);
+    if (!privyDeletion.ok) {
+      err(res, privyDeletion.status, privyDeletion.message);
+      return;
+    }
+
+    const db = getDb();
+    const tx = db.transaction(() => {
+      db.prepare("DELETE FROM user_notifications WHERE LOWER(user_address) = ?").run(address);
+      db.prepare("DELETE FROM funding_sync_state WHERE LOWER(user_address) = ?").run(address);
+      db.prepare("DELETE FROM referral_codes WHERE LOWER(referrer_address) = ?").run(address);
+      db.prepare("DELETE FROM user_referrals WHERE LOWER(user_address) = ?").run(address);
+      db.prepare("DELETE FROM user_settings WHERE LOWER(address) = ?").run(address);
+    });
+    tx();
+
+    res.set("Cache-Control", "private, no-store");
+    res.json({ success: true });
+  } catch (error) {
+    console.error("[Account Delete] Local cleanup failed:", error);
+    err(res, 500, "Could not delete local account data");
+  }
+});
+
+router.get("/wallet/:address/notifications", (req: Request, res: Response) => {
+  const address = String(req.params.address || "").toLowerCase();
+  if (!isAddress(address)) {
+    err(res, 400, "Invalid account address");
+    return;
+  }
+  const page = Math.max(1, Number(req.query.page || 1) || 1);
+  const limit = Math.min(20, Math.max(1, Number(req.query.limit || 7) || 7));
+  const db = getDb();
+  const total = db.prepare("SELECT COUNT(*) as count FROM user_notifications WHERE user_address = ?").get(address) as { count: number };
+  const unread = db.prepare("SELECT COUNT(*) as count FROM user_notifications WHERE user_address = ? AND status = 'unread'").get(address) as { count: number };
+  const records = db
+    .prepare(
+      `SELECT id, type, title, body, status, metadata_json as metadataJson, created_at as createdAt
+       FROM user_notifications
+       WHERE user_address = ?
+       ORDER BY created_at DESC
+       LIMIT ? OFFSET ?`
+    )
+    .all(address, limit, (page - 1) * limit)
+    .map((row: any) => ({
+      ...row,
+      metadata: row.metadataJson ? JSON.parse(row.metadataJson) : null,
+      metadataJson: undefined,
+    }));
+  res.set("Cache-Control", "private, no-store");
+  res.json({ page, limit, total: total.count, unread: unread.count, records });
+});
+
+router.post("/wallet/:address/notifications/:id/read", (req: Request, res: Response) => {
+  const address = String(req.params.address || "").toLowerCase();
+  const id = Number(req.params.id || 0);
+  if (!isAddress(address) || !Number.isInteger(id) || id <= 0) {
+    err(res, 400, "Invalid notification request");
+    return;
+  }
+  const db = getDb();
+  db.prepare("UPDATE user_notifications SET status = 'read' WHERE user_address = ? AND id = ?").run(address, id);
+  res.json({ success: true });
+});
+
+router.post("/wallet/:address/notifications/read-all", (req: Request, res: Response) => {
+  const address = String(req.params.address || "").toLowerCase();
+  if (!isAddress(address)) {
+    err(res, 400, "Invalid account address");
+    return;
+  }
+  const db = getDb();
+  db.prepare("UPDATE user_notifications SET status = 'read' WHERE user_address = ?").run(address);
+  res.json({ success: true });
+});
+
 router.get("/posts/:handle/:tweetId", (req: Request, res: Response) => {
   const handle = String(req.params.handle || "").replace(/^@/, "");
   const tweetId = String(req.params.tweetId || "");
@@ -101,16 +701,20 @@ router.get("/creators/:username", (req: Request, res: Response) => {
   }
 
   const total = db
-    .prepare("SELECT COALESCE(SUM(CAST(amount AS REAL)), 0) as total, COUNT(*) as count FROM tips WHERE author_id = ?")
-    .get(claim.author_id) as { total: number; count: number } | undefined;
+    .prepare(
+      `SELECT COALESCE(SUM(CAST(t.amount AS REAL)), 0) as total, COUNT(*) as count
+       FROM tips t LEFT JOIN tip_metadata m ON t.content_id = m.content_id
+       WHERE ${creatorTipPredicate("t")}`
+    )
+    .get(claim.author_id, claim.username) as { total: number; count: number } | undefined;
 
   const topPosts = db
     .prepare(
       `SELECT t.content_id, SUM(CAST(t.amount AS REAL)) as total, COUNT(*) as count, m.tweet_id, m.author_handle
        FROM tips t LEFT JOIN tip_metadata m ON t.content_id = m.content_id
-       WHERE t.author_id = ? GROUP BY t.content_id ORDER BY total DESC LIMIT 10`
+       WHERE ${creatorTipPredicate("t")} GROUP BY t.content_id ORDER BY total DESC LIMIT 10`
     )
-    .all(claim.author_id) as Array<{
+    .all(claim.author_id, claim.username) as Array<{
       content_id: string;
       total: number;
       count: number;
@@ -120,9 +724,23 @@ router.get("/creators/:username", (req: Request, res: Response) => {
 
   const topSupporters = db
     .prepare(
-      "SELECT from_address, SUM(CAST(amount AS REAL)) as total FROM tips WHERE author_id = ? GROUP BY from_address ORDER BY total DESC LIMIT 10"
+      `SELECT t.from_address, SUM(CAST(t.amount AS REAL)) as total
+       FROM tips t LEFT JOIN tip_metadata m ON t.content_id = m.content_id
+       WHERE ${creatorTipPredicate("t")}
+       GROUP BY t.from_address ORDER BY total DESC LIMIT 10`
     )
-    .all(claim.author_id) as Array<{ from_address: string; total: number }>;
+    .all(claim.author_id, claim.username) as Array<{ from_address: string; total: number }>;
+
+  const recentTips = db
+    .prepare(
+      `SELECT 'tip_received' as type, t.amount, t.tx_hash, t.timestamp,
+              t.from_address as from_addr, m.author_handle, m.tweet_id
+       FROM tips t LEFT JOIN tip_metadata m ON t.content_id = m.content_id
+       WHERE ${creatorTipPredicate("t")}
+       ORDER BY t.timestamp DESC
+       LIMIT 7`
+    )
+    .all(claim.author_id, claim.username);
 
   res.set("Cache-Control", "public, max-age=60");
   res.json({
@@ -143,6 +761,7 @@ router.get("/creators/:username", (req: Request, res: Response) => {
       address: s.from_address,
       totalUsd: (s.total / 1e6).toFixed(2),
     })),
+    recentTips,
   });
 });
 
@@ -153,8 +772,8 @@ router.get("/creators/:username/earnings-over-time", (req: Request, res: Respons
   const db = getDb();
 
   const claim = db
-    .prepare("SELECT author_id FROM verified_claims WHERE LOWER(username) = ?")
-    .get(username) as { author_id: string } | undefined;
+    .prepare("SELECT author_id, username FROM verified_claims WHERE LOWER(username) = ? ORDER BY verified_at DESC LIMIT 1")
+    .get(username) as { author_id: string; username: string } | undefined;
 
   if (!claim) {
     err(res, 404, "Creator not found or not verified", "NOT_FOUND");
@@ -165,22 +784,127 @@ router.get("/creators/:username/earnings-over-time", (req: Request, res: Respons
   const rows = db
     .prepare(
       `SELECT date(timestamp, 'unixepoch') as day, SUM(CAST(amount AS REAL)) as total
-       FROM tips WHERE author_id = ? AND timestamp >= ?
+       FROM tips t LEFT JOIN tip_metadata m ON t.content_id = m.content_id
+       WHERE ${creatorTipPredicate("t")} AND t.timestamp >= ?
        GROUP BY day ORDER BY day ASC`
     )
-    .all(claim.author_id, since) as Array<{ day: string; total: number }>;
+    .all(claim.author_id, claim.username, since) as Array<{ day: string; total: number }>;
+  const totalsByDay = new Map(rows.map((r) => [r.day, r.total]));
+  const today = new Date();
+  const daily = Array.from({ length: days }, (_, index) => {
+    const day = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+    day.setUTCDate(day.getUTCDate() - (days - 1 - index));
+    const date = day.toISOString().slice(0, 10);
+    const total = totalsByDay.get(date) ?? 0;
+    return {
+      date,
+      amountRaw: total.toString(),
+      amountUsd: (total / 1e6).toFixed(2),
+    };
+  });
 
   res.set("Cache-Control", "public, max-age=60");
   res.json({
-    daily: rows.map((r) => ({
-      date: r.day,
-      amountRaw: r.total.toString(),
-      amountUsd: (r.total / 1e6).toFixed(2),
-    })),
+    daily,
   });
 });
 
 // ─── GET /tippers/:address ───────────────────────────────────────────────
+// GET /creators/:username/performance
+// Source-of-truth service for creator performance figures. Every number is
+// derived from indexed DB rows and returned with raw values plus display values.
+router.get("/creators/:username/performance", (req: Request, res: Response) => {
+  const result = getCreatorPerformance(req.params.username as string, {
+    period: req.query.period,
+    endDate: req.query.endDate,
+  });
+
+  if (!result) {
+    err(res, 404, "Creator not found or not verified", "NOT_FOUND");
+    return;
+  }
+
+  res.set("Cache-Control", "public, max-age=60");
+  res.json(result);
+});
+
+router.post("/creators/:username/supporters/:supporterAddress/thank", async (req: Request, res: Response) => {
+  const creatorIdentifier = String(req.params.username || "").trim();
+  const supporterAddress = String(req.params.supporterAddress || "").toLowerCase();
+  const ownerAddress = String(req.body?.ownerAddress || "").toLowerCase();
+  if (!creatorIdentifier || !isAddress(supporterAddress) || !isAddress(ownerAddress)) {
+    err(res, 400, "Invalid creator, supporter, or owner address");
+    return;
+  }
+
+  const verified = await verifyWalletProof(ownerAddress, "supporter-thank", req.body?.walletProof);
+  if (!verified) {
+    err(res, 401, "Account verification failed");
+    return;
+  }
+
+  const db = getDb();
+  const username = creatorIdentifier.replace(/^@/, "").toLowerCase();
+  const claim = db
+    .prepare(
+      `SELECT author_id, username, display_name, owner_address
+       FROM verified_claims
+       WHERE LOWER(owner_address) = ? AND (author_id = ? OR LOWER(username) = ?)
+       ORDER BY verified_at DESC
+       LIMIT 1`
+    )
+    .get(ownerAddress, creatorIdentifier, username) as
+    | { author_id: string; username: string; display_name: string | null; owner_address: string }
+    | undefined;
+
+  if (!claim) {
+    err(res, 403, "Creator account is not verified for this owner", "CREATOR_NOT_VERIFIED");
+    return;
+  }
+
+  const supporter = db
+    .prepare(
+      `SELECT LOWER(t.from_address) as address, COUNT(*) as tipCount, COALESCE(SUM(CAST(t.amount AS REAL)), 0) as totalRaw
+       FROM tips t
+       LEFT JOIN tip_metadata m ON t.content_id = m.content_id
+       WHERE LOWER(t.from_address) = ?
+         AND (t.author_id = ? OR LOWER(COALESCE(m.author_handle, '')) = LOWER(?))
+       GROUP BY LOWER(t.from_address)
+       LIMIT 1`
+    )
+    .get(supporterAddress, claim.author_id, claim.username) as
+    | { address: string; tipCount: number; totalRaw: number }
+    | undefined;
+
+  if (!supporter) {
+    err(res, 404, "Supporter has no recorded tips for this creator", "SUPPORTER_NOT_FOUND");
+    return;
+  }
+
+  const totalRaw = String(Math.trunc(Number(supporter.totalRaw || 0)));
+  const notificationId = createThankYouMessageNotification({
+    userAddress: supporterAddress,
+    creatorUsername: claim.username,
+    creatorDisplayName: claim.display_name,
+    creatorOwnerAddress: ownerAddress,
+    totalRaw,
+    tipCount: supporter.tipCount,
+  });
+
+  res.set("Cache-Control", "private, no-store");
+  res.json({
+    success: true,
+    notificationId,
+    supporter: {
+      address: supporterAddress,
+      truncatedAddress: `${supporterAddress.slice(0, 6)}...${supporterAddress.slice(-4)}`,
+      totalRaw,
+      totalUsd: rawToUsd(totalRaw),
+      tipCount: supporter.tipCount,
+    },
+  });
+});
+
 router.get("/tippers/:address", (req: Request, res: Response) => {
   const address = (req.params.address as string).toLowerCase();
   const stats = getUnifiedTipperStats(address);
@@ -194,9 +918,13 @@ router.get("/tippers/:address", (req: Request, res: Response) => {
     creatorsSupported: stats.creatorsSupported.map((c) => ({
       authorId: c.authorId,
       username: c.username,
+      profileImageUrl: c.profileImageUrl,
       totalUsd: (Number(c.totalRaw) / 1e6).toFixed(2),
       totalRaw: c.totalRaw,
       tipCount: c.tipCount,
+      isVerified: c.isVerified,
+      claimWalletDeployed: c.claimWalletDeployed,
+      claimStatus: c.claimStatus,
     })),
   });
 });
@@ -218,7 +946,455 @@ router.get("/stats", (req: Request, res: Response) => {
   });
 });
 
+// ─── GET /discover ────────────────────────────────────────────────────────
+router.get("/discover", (req: Request, res: Response) => {
+  const addressParam = typeof req.query.address === "string" ? req.query.address.toLowerCase() : "";
+  const address = addressParam && isAddress(addressParam) ? addressParam : "";
+  const db = getDb();
+  const now = Math.floor(Date.now() / 1000);
+  const sevenDaysAgo = now - 7 * 24 * 60 * 60;
+  const todayStart = now - 24 * 60 * 60;
+  const weekStart = Math.floor(Date.UTC(
+    new Date().getUTCFullYear(),
+    new Date().getUTCMonth(),
+    new Date().getUTCDate() - ((new Date().getUTCDay() + 6) % 7),
+    0, 0, 0, 0
+  ) / 1000);
+
+  const trendingRows = db
+    .prepare(
+      `SELECT
+         t.content_id,
+         t.author_id,
+         COALESCE(SUM(CAST(t.amount AS REAL)), 0) as total,
+         COUNT(*) as tip_count,
+         COUNT(DISTINCT t.from_address) as unique_tippers,
+         MAX(t.timestamp) as last_tip_at,
+         SUM(CASE WHEN t.timestamp >= ? THEN 1 ELSE 0 END) as tips_today,
+         m.author_handle,
+         m.tweet_id,
+         (
+           SELECT username FROM verified_claims
+           WHERE author_id = t.author_id OR (m.author_handle IS NOT NULL AND LOWER(username) = LOWER(m.author_handle))
+           ORDER BY verified_at DESC
+           LIMIT 1
+         ) as username,
+         (
+           SELECT display_name FROM verified_claims
+           WHERE author_id = t.author_id OR (m.author_handle IS NOT NULL AND LOWER(username) = LOWER(m.author_handle))
+           ORDER BY verified_at DESC
+           LIMIT 1
+         ) as display_name,
+         (
+           SELECT profile_image_url FROM verified_claims
+           WHERE author_id = t.author_id OR (m.author_handle IS NOT NULL AND LOWER(username) = LOWER(m.author_handle))
+           ORDER BY verified_at DESC
+           LIMIT 1
+         ) as profile_image_url
+       FROM tips t
+       LEFT JOIN tip_metadata m ON m.content_id = t.content_id
+       WHERE COALESCE(m.kind, 'post_tip') = 'post_tip'
+       GROUP BY t.content_id
+       ORDER BY tips_today DESC, unique_tippers DESC, total DESC, last_tip_at DESC
+       LIMIT 4`
+    )
+    .all(todayStart) as Array<{
+      content_id: string;
+      author_id: string;
+      total: number;
+      tip_count: number;
+      unique_tippers: number;
+      last_tip_at: number;
+      tips_today: number;
+      author_handle: string | null;
+      tweet_id: string | null;
+      username: string | null;
+      display_name: string | null;
+      profile_image_url: string | null;
+    }>;
+
+  const creatorRows = db
+    .prepare(
+      `SELECT
+         t.author_id,
+         COALESCE(SUM(CAST(t.amount AS REAL)), 0) as total,
+         COUNT(*) as tip_count,
+         COUNT(DISTINCT t.from_address) as unique_supporters,
+         COUNT(DISTINCT t.content_id) as tipped_posts,
+         MAX(t.timestamp) as last_tip_at,
+         SUM(CASE WHEN t.timestamp >= ? THEN 1 ELSE 0 END) as recent_tip_count,
+         SUM(CASE WHEN t.timestamp >= ? THEN CAST(t.amount AS REAL) ELSE 0 END) as total_this_week,
+         (
+           SELECT username FROM verified_claims
+           WHERE author_id = t.author_id
+              OR LOWER(username) = LOWER((
+                SELECT tm.author_handle
+                FROM tips rt
+                LEFT JOIN tip_metadata tm ON tm.content_id = rt.content_id
+                WHERE rt.author_id = t.author_id AND tm.author_handle IS NOT NULL
+                ORDER BY rt.timestamp DESC
+                LIMIT 1
+              ))
+           ORDER BY verified_at DESC
+           LIMIT 1
+         ) as username,
+         (
+           SELECT display_name FROM verified_claims
+           WHERE author_id = t.author_id
+              OR LOWER(username) = LOWER((
+                SELECT tm.author_handle
+                FROM tips rt
+                LEFT JOIN tip_metadata tm ON tm.content_id = rt.content_id
+                WHERE rt.author_id = t.author_id AND tm.author_handle IS NOT NULL
+                ORDER BY rt.timestamp DESC
+                LIMIT 1
+              ))
+           ORDER BY verified_at DESC
+           LIMIT 1
+         ) as display_name,
+         (
+           SELECT profile_image_url FROM verified_claims
+           WHERE author_id = t.author_id
+              OR LOWER(username) = LOWER((
+                SELECT tm.author_handle
+                FROM tips rt
+                LEFT JOIN tip_metadata tm ON tm.content_id = rt.content_id
+                WHERE rt.author_id = t.author_id AND tm.author_handle IS NOT NULL
+                ORDER BY rt.timestamp DESC
+                LIMIT 1
+              ))
+           ORDER BY verified_at DESC
+           LIMIT 1
+         ) as profile_image_url,
+         (
+           SELECT tm.author_handle
+           FROM tips rt
+           LEFT JOIN tip_metadata tm ON tm.content_id = rt.content_id
+           WHERE rt.author_id = t.author_id AND tm.author_handle IS NOT NULL
+           ORDER BY rt.timestamp DESC
+           LIMIT 1
+         ) as latest_handle
+       FROM tips t
+       GROUP BY t.author_id
+       ORDER BY recent_tip_count DESC, unique_supporters DESC, total DESC
+       LIMIT 60`
+    )
+    .all(sevenDaysAgo, weekStart) as Array<{
+      author_id: string;
+      total: number;
+      tip_count: number;
+      unique_supporters: number;
+      tipped_posts: number;
+      last_tip_at: number;
+      recent_tip_count: number;
+      total_this_week: number;
+      username: string | null;
+      display_name: string | null;
+      profile_image_url: string | null;
+      latest_handle: string | null;
+    }>;
+
+  const tippedBeforeAuthors = address
+    ? new Set(
+        (db
+          .prepare("SELECT DISTINCT author_id FROM tips WHERE LOWER(from_address) = ?")
+          .all(address) as Array<{ author_id: string }>)
+          .map((row) => row.author_id)
+      )
+    : new Set<string>();
+  const tippedBeforeArgs = Array.from(tippedBeforeAuthors);
+  const sharedSupporterStmt = tippedBeforeArgs.length
+    ? db.prepare(
+        `SELECT COUNT(DISTINCT from_address) as count
+         FROM tips
+         WHERE author_id = ?
+           AND LOWER(from_address) IN (
+             SELECT DISTINCT LOWER(from_address)
+             FROM tips
+             WHERE author_id IN (${tippedBeforeArgs.map(() => "?").join(",")})
+           )`
+      )
+    : null;
+
+  const recommendations = creatorRows.map((row) => {
+    const isVerified = Boolean(row.username);
+    const handle = (row.username || row.latest_handle || "").replace(/^@/, "");
+    const isTippedBefore = tippedBeforeAuthors.has(row.author_id);
+    const repeatTips = Math.max(0, Number(row.tip_count || 0) - Number(row.unique_supporters || 0));
+    const sharedSupporters = sharedSupporterStmt
+      ? ((sharedSupporterStmt.get(row.author_id, ...tippedBeforeArgs) as { count: number } | undefined)?.count || 0)
+      : 0;
+    const unclaimedSignal = !isVerified && Number(row.total || 0) > 0 ? 1 : 0;
+    const score =
+      Number(row.recent_tip_count || 0) * 4 +
+      Number(row.unique_supporters || 0) * 3 +
+      unclaimedSignal * 6 +
+      repeatTips * 2 +
+      sharedSupporters * 3 +
+      Number(row.total || 0) / 1e6 * 0.05;
+
+    let reason = "Receiving support across Teep";
+    let reasonType: "recent_unique" | "unclaimed_recent" | "retip" | "similar" | "tipped_before" | "general" = "general";
+    if (!isVerified && row.recent_tip_count > 0) {
+      reason = "Has tips waiting to be claimed";
+      reasonType = "unclaimed_recent";
+    } else if (isTippedBefore) {
+      reason = "You tipped this creator before";
+      reasonType = "tipped_before";
+    } else if (sharedSupporters > 0) {
+      reason = "Similar to creators you tipped before";
+      reasonType = "similar";
+    } else if (repeatTips > 0) {
+      reason = "Supporters keep tipping this creator";
+      reasonType = "retip";
+    } else if (row.recent_tip_count > 0 && row.unique_supporters > 1) {
+      reason = "Recently received support from multiple tippers";
+      reasonType = "recent_unique";
+    }
+
+    return {
+      authorId: row.author_id,
+      username: handle || null,
+      displayName: row.display_name,
+      profileImageUrl: row.profile_image_url,
+      totalReceivedUsd: rawToUsd(row.total),
+      totalThisWeekUsd: rawToUsd(row.total_this_week),
+      tipCount: row.tip_count,
+      uniqueSupporters: row.unique_supporters,
+      tippedPosts: row.tipped_posts,
+      lastTipAt: row.last_tip_at,
+      lastTipAgo: timeAgoFromUnix(row.last_tip_at),
+      recentTipCount: row.recent_tip_count,
+      isVerified,
+      claimStatus: isVerified ? "verified" : "unclaimed",
+      reason,
+      reasonType,
+      score,
+    };
+  });
+
+  const recommendedCreators = recommendations
+    .slice()
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 4);
+  const topCreators = recommendations
+    .filter((creator) => creator.isVerified)
+    .slice()
+    .map((creator) => ({ ...creator, totalReceivedUsd: creator.totalThisWeekUsd }))
+    .filter((creator) => Number(creator.totalReceivedUsd) > 0)
+    .sort((a, b) => Number(b.totalReceivedUsd) - Number(a.totalReceivedUsd))
+    .slice(0, 3);
+  const topCreatorsAllTime = recommendations
+    .filter((creator) => creator.isVerified)
+    .slice()
+    .sort((a, b) => Number(b.totalReceivedUsd) - Number(a.totalReceivedUsd))
+    .slice(0, 3);
+  const unclaimedCreators = recommendations
+    .filter((creator) => creator.claimStatus === "unclaimed")
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+  const tipperStats = address ? getUnifiedTipperStats(address) : null;
+  const allUserSupportedCreators = tipperStats?.creatorsSupported || [];
+  const tippedBefore = address
+    ? allUserSupportedCreators.slice(0, 4).map((creator) => ({
+        authorId: creator.authorId,
+        username: creator.username,
+        displayName: null,
+        profileImageUrl: creator.profileImageUrl,
+        totalReceivedUsd: creator.total,
+        tipCount: creator.tipCount,
+        uniqueSupporters: null,
+        tippedPosts: null,
+        lastTipAt: null,
+        lastTipAgo: null,
+        recentTipCount: null,
+        isVerified: creator.isVerified,
+        claimStatus: creator.claimStatus,
+        reason: "You tipped this creator before",
+        reasonType: "tipped_before",
+      }))
+    : [];
+
+  const trendingPosts = trendingRows.map((row) => {
+    const handle = (row.username || row.author_handle || "").replace(/^@/, "");
+    const reason = row.tips_today > 1
+      ? `${row.tips_today} tips in the last 24h`
+      : row.unique_tippers > 1
+        ? `${row.unique_tippers} people tipped this post`
+        : "Recently tipped";
+    return {
+      contentId: row.content_id,
+      authorId: row.author_id,
+      username: handle || null,
+      displayName: row.display_name,
+      profileImageUrl: row.profile_image_url,
+      tweetId: row.tweet_id,
+      totalTippedUsd: rawToUsd(row.total),
+      tipCount: row.tip_count,
+      uniqueTippers: row.unique_tippers,
+      tipsToday: row.tips_today,
+      lastTipAt: row.last_tip_at,
+      lastTipAgo: timeAgoFromUnix(row.last_tip_at),
+      postPreview: row.tweet_id ? "Tipped post on X" : "Tipped creator content",
+      reason,
+      claimStatus: row.username ? "verified" : "unclaimed",
+    };
+  });
+
+  const userSupportedAuthorIds = new Set(allUserSupportedCreators.map((creator) => creator.authorId).filter(Boolean));
+  const userTrendingConnections = recommendations.filter((creator) => userSupportedAuthorIds.has(creator.authorId) && creator.recentTipCount > 0).length;
+
+  res.set("Cache-Control", "public, max-age=30");
+  res.json({
+    algorithm: {
+      version: "discover-beta-v1",
+      signals: [
+        "recent tips + unique supporters",
+        "unclaimed support + recent activity",
+        "high re-tip activity",
+        "similar to creators you tipped",
+      ],
+    },
+    trendingPosts,
+    recommendedCreators,
+    topCreators,
+    topCreatorsAllTime,
+    unclaimedCreators,
+    tippedBefore,
+    orbit: {
+      connections: userSupportedAuthorIds.size,
+      directTips: tipperStats?.tipCount || 0,
+      unclaimed: allUserSupportedCreators.filter((creator) => creator.claimStatus === "unclaimed").length,
+      trending: userTrendingConnections,
+    },
+  });
+});
+
 // ─── GET /leaderboard/creators ────────────────────────────────────────────
+// ─── GET /discover/search ─────────────────────────────────────────────────────
+router.get("/discover/search", (req: Request, res: Response) => {
+  const rawQuery = typeof req.query.q === "string" ? req.query.q.trim().replace(/^@/, "").toLowerCase() : "";
+  const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 8, 1), 20);
+  if (rawQuery.length < 2) {
+    res.json({ results: [] });
+    return;
+  }
+
+  const db = getDb();
+  const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
+  const like = `%${rawQuery}%`;
+  const rows = db
+    .prepare(
+      `WITH creator_activity AS (
+         SELECT
+           t.author_id,
+           COALESCE(SUM(CAST(t.amount AS REAL)), 0) as total,
+           COUNT(*) as tip_count,
+           COUNT(DISTINCT t.from_address) as unique_supporters,
+           COUNT(DISTINCT t.content_id) as tipped_posts,
+           MAX(t.timestamp) as last_tip_at,
+           SUM(CASE WHEN t.timestamp >= ? THEN 1 ELSE 0 END) as recent_tip_count,
+           (
+             SELECT username FROM verified_claims
+             WHERE author_id = t.author_id
+                OR LOWER(username) = LOWER((
+                  SELECT tm.author_handle
+                  FROM tips rt
+                  LEFT JOIN tip_metadata tm ON tm.content_id = rt.content_id
+                  WHERE rt.author_id = t.author_id AND tm.author_handle IS NOT NULL
+                  ORDER BY rt.timestamp DESC
+                  LIMIT 1
+                ))
+             ORDER BY verified_at DESC
+             LIMIT 1
+           ) as username,
+           (
+             SELECT display_name FROM verified_claims
+             WHERE author_id = t.author_id
+                OR LOWER(username) = LOWER((
+                  SELECT tm.author_handle
+                  FROM tips rt
+                  LEFT JOIN tip_metadata tm ON tm.content_id = rt.content_id
+                  WHERE rt.author_id = t.author_id AND tm.author_handle IS NOT NULL
+                  ORDER BY rt.timestamp DESC
+                  LIMIT 1
+                ))
+             ORDER BY verified_at DESC
+             LIMIT 1
+           ) as display_name,
+           (
+             SELECT profile_image_url FROM verified_claims
+             WHERE author_id = t.author_id
+                OR LOWER(username) = LOWER((
+                  SELECT tm.author_handle
+                  FROM tips rt
+                  LEFT JOIN tip_metadata tm ON tm.content_id = rt.content_id
+                  WHERE rt.author_id = t.author_id AND tm.author_handle IS NOT NULL
+                  ORDER BY rt.timestamp DESC
+                  LIMIT 1
+                ))
+             ORDER BY verified_at DESC
+             LIMIT 1
+           ) as profile_image_url,
+           (
+             SELECT tm.author_handle
+             FROM tips rt
+             LEFT JOIN tip_metadata tm ON tm.content_id = rt.content_id
+             WHERE rt.author_id = t.author_id AND tm.author_handle IS NOT NULL
+             ORDER BY rt.timestamp DESC
+             LIMIT 1
+           ) as latest_handle
+         FROM tips t
+         GROUP BY t.author_id
+       )
+       SELECT *
+       FROM creator_activity
+       WHERE LOWER(COALESCE(username, latest_handle, '')) LIKE ?
+          OR LOWER(COALESCE(display_name, '')) LIKE ?
+          OR LOWER(author_id) LIKE ?
+       ORDER BY last_tip_at DESC, total DESC
+       LIMIT ?`
+    )
+    .all(sevenDaysAgo, like, like, like, limit) as Array<{
+      author_id: string;
+      total: number;
+      tip_count: number;
+      unique_supporters: number;
+      tipped_posts: number;
+      last_tip_at: number;
+      recent_tip_count: number;
+      username: string | null;
+      display_name: string | null;
+      profile_image_url: string | null;
+      latest_handle: string | null;
+    }>;
+
+  res.set("Cache-Control", "private, max-age=10");
+  res.json({
+    results: rows.map((row) => {
+      const isVerified = Boolean(row.username);
+      const handle = (row.username || row.latest_handle || "").replace(/^@/, "");
+      return {
+        authorId: row.author_id,
+        username: handle || null,
+        displayName: row.display_name,
+        profileImageUrl: row.profile_image_url,
+        totalReceivedUsd: rawToUsd(row.total),
+        tipCount: row.tip_count,
+        uniqueSupporters: row.unique_supporters,
+        tippedPosts: row.tipped_posts,
+        lastTipAt: row.last_tip_at,
+        lastTipAgo: timeAgoFromUnix(row.last_tip_at),
+        recentTipCount: row.recent_tip_count,
+        isVerified,
+        claimStatus: isVerified ? "verified" : "unclaimed",
+        reason: "Recorded in Teep tip activity",
+        reasonType: "general",
+      };
+    }),
+  });
+});
+
 router.get("/leaderboard/creators", (req: Request, res: Response) => {
   const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
   const period = req.query.period as string;
@@ -308,10 +1484,7 @@ router.get("/wallet/:address/eligibility", async (req: Request, res: Response) =
     const factoryAddress = process.env.FACTORY_ADDRESS as `0x${string}` | undefined;
     if (factoryAddress && RPC_URL) {
       try {
-        const client = createPublicClient({
-          chain: CHAIN,
-          transport: http(RPC_URL),
-        });
+        const client = createBackendPublicClient({ url: RPC_URL });
         const deployed = await client.readContract({
           address: factoryAddress,
           abi: [{ name: "isDeployed", type: "function", stateMutability: "view", inputs: [{ name: "_authorId", type: "uint256" }], outputs: [{ type: "bool" }] }],
@@ -358,10 +1531,7 @@ router.get("/wallet/:address/usdc-balance", async (req: Request, res: Response) 
     return;
   }
   try {
-    const client = createPublicClient({
-      chain: CHAIN,
-      transport: http(RPC_URL),
-    });
+    const client = createBackendPublicClient({ url: RPC_URL });
     const balanceRaw = await client.readContract({
       address: USDC_ADDRESS,
       abi: ERC20_ABI,
@@ -370,6 +1540,11 @@ router.get("/wallet/:address/usdc-balance", async (req: Request, res: Response) 
     });
     const rawStr = balanceRaw.toString();
     const usd = (Number(balanceRaw) / 1e6).toFixed(2);
+    const settings = getUserSettings(address);
+    const thresholdRaw = BigInt(Math.round(Number(settings.defaultTipAmount) * 1e6));
+    if (settings.notifications.lowBalance && thresholdRaw > 0n && balanceRaw < thresholdRaw) {
+      createLowBalanceNotification({ userAddress: address, balanceRaw: rawStr, thresholdUsd: settings.defaultTipAmount });
+    }
     res.set("Cache-Control", "public, max-age=15");
     res.json({ address, balanceRaw: rawStr, balanceUsd: usd });
   } catch (e) {
@@ -390,13 +1565,29 @@ router.get("/wallet/:address/balance", async (req: Request, res: Response) => {
     return;
   }
 
-  let claimWalletAddress: string;
-  const row = db
-    .prepare("SELECT wallet_address FROM claim_wallets WHERE author_id = ?")
-    .get(authorId) as { wallet_address: string } | undefined;
+  let claimWalletAddresses = (
+    db
+      .prepare("SELECT DISTINCT wallet_address FROM claim_wallets WHERE LOWER(owner_address) = ?")
+      .all(address) as Array<{ wallet_address: string }>
+  ).map((row) => row.wallet_address.toLowerCase());
 
-  if (row) {
-    claimWalletAddress = row.wallet_address;
+  const legacyWalletAddresses = (
+    db
+      .prepare(
+        `SELECT DISTINCT l.wallet_address
+         FROM claim_wallet_legacy l
+         JOIN verified_claims v ON v.author_id = l.author_id
+         WHERE LOWER(v.owner_address) = ?`
+      )
+      .all(address) as Array<{ wallet_address: string }>
+  ).map((row) => row.wallet_address.toLowerCase());
+
+  claimWalletAddresses = [...claimWalletAddresses, ...legacyWalletAddresses]
+    .filter((wallet, index, all) => /^0x[a-f0-9]{40}$/.test(wallet) && all.indexOf(wallet) === index);
+
+  if (claimWalletAddresses.length > 0) {
+    // Include every claim wallet owned by this creator so legacy hash-id wallets and
+    // new numeric X-id wallets do not mask each other on the dashboard.
   } else {
     // Indexer may not have it; try chain
     const factoryAddress = process.env.FACTORY_ADDRESS as `0x${string}` | undefined;
@@ -405,10 +1596,7 @@ router.get("/wallet/:address/balance", async (req: Request, res: Response) => {
       return;
     }
     try {
-      const client = createPublicClient({
-        chain: CHAIN,
-        transport: http(RPC_URL),
-      });
+      const client = createBackendPublicClient({ url: RPC_URL });
       const isDeployed = await client.readContract({
         address: factoryAddress,
         abi: [{ name: "isDeployed", type: "function", stateMutability: "view", inputs: [{ name: "_authorId", type: "uint256" }], outputs: [{ type: "bool" }] }],
@@ -425,7 +1613,7 @@ router.get("/wallet/:address/balance", async (req: Request, res: Response) => {
         functionName: "computeClaimWallet",
         args: [BigInt(authorId)],
       });
-      claimWalletAddress = (walletAddr as string).toLowerCase();
+      claimWalletAddresses = [(walletAddr as string).toLowerCase()];
     } catch {
       err(res, 404, "Claim wallet not found", "NOT_FOUND");
       return;
@@ -438,23 +1626,32 @@ router.get("/wallet/:address/balance", async (req: Request, res: Response) => {
   }
 
   try {
-    const client = createPublicClient({
-      chain: CHAIN,
-      transport: http(RPC_URL),
-    });
-    const balanceRaw = await client.readContract({
-      address: USDC_ADDRESS,
-      abi: ERC20_ABI,
-      functionName: "balanceOf",
-      args: [claimWalletAddress as `0x${string}`],
-    });
+    const client = createBackendPublicClient({ url: RPC_URL });
+    let balanceRaw = 0n;
+    const walletBalances: Array<{ address: string; balanceRaw: string; balanceUsd: string }> = [];
+    for (const claimWalletAddress of claimWalletAddresses) {
+      const walletBalanceRaw = await client.readContract({
+        address: USDC_ADDRESS,
+        abi: ERC20_ABI,
+        functionName: "balanceOf",
+        args: [claimWalletAddress as `0x${string}`],
+      });
+      balanceRaw += walletBalanceRaw;
+      walletBalances.push({
+        address: claimWalletAddress,
+        balanceRaw: walletBalanceRaw.toString(),
+        balanceUsd: (Number(walletBalanceRaw) / 1e6).toFixed(2),
+      });
+    }
     const rawStr = balanceRaw.toString();
     const usd = (Number(balanceRaw) / 1e6).toFixed(2);
 
     res.set("Cache-Control", "public, max-age=30");
     res.json({
       address,
-      claimWalletAddress,
+      claimWalletAddress: claimWalletAddresses[0],
+      claimWalletAddresses,
+      claimWalletBalances: walletBalances,
       balanceRaw: rawStr,
       balanceUsd: usd,
     });
@@ -465,13 +1662,85 @@ router.get("/wallet/:address/balance", async (req: Request, res: Response) => {
 });
 
 /** Strip HTML tags to get plain text (for tweet excerpt from oEmbed html). */
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ");
+}
+
 function stripHtmlExcerpt(html: string, maxLen: number = 200): string {
-  const text = html
+  const text = decodeHtmlEntities(html
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
-    .trim();
-  return text.length > maxLen ? text.slice(0, maxLen) + "…" : text;
+    .trim());
+  return text.length > maxLen ? `${text.slice(0, maxLen - 1)}...` : text;
+}
+
+function extractOembedImage(html: string): string | null {
+  const match = html.match(/<img[^>]+src=["']([^"']+)["']/i);
+  return match?.[1] || null;
+}
+
+function oembedFallback(res: Response, url: string, reason: string) {
+  res.set("Cache-Control", "public, max-age=60");
+  res.json({
+    author_name: null,
+    author_url: null,
+    excerpt: null,
+    width: null,
+    unavailable: true,
+    source_url: url,
+    reason,
+  });
+}
+
+function fetchJsonInsecureDevOnly(url: string): Promise<{ ok: boolean; status: number; json: unknown }> {
+  if (!ALLOW_INSECURE_OEMBED_TLS) {
+    return fetch(url, { headers: { Accept: "application/json" } }).then(async (response) => ({
+      ok: response.ok,
+      status: response.status,
+      json: response.ok ? await response.json() : null,
+    }));
+  }
+
+  if (!warnedInsecureOembedTls) {
+    warnedInsecureOembedTls = true;
+    console.warn("[API v1] ALLOW_INSECURE_OEMBED_TLS=true is enabled. X oEmbed TLS verification is disabled for local development only.");
+  }
+
+  return new Promise((resolve, reject) => {
+    const request = https.get(
+      url,
+      {
+        headers: { Accept: "application/json" },
+        agent: new https.Agent({ rejectUnauthorized: false }),
+        timeout: 8000,
+      },
+      (response) => {
+        let body = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk) => {
+          body += chunk;
+        });
+        response.on("end", () => {
+          const status = response.statusCode || 500;
+          try {
+            resolve({ ok: status >= 200 && status < 300, status, json: body ? JSON.parse(body) : null });
+          } catch (error) {
+            reject(error);
+          }
+        });
+      }
+    );
+    request.on("timeout", () => request.destroy(new Error("oEmbed request timed out")));
+    request.on("error", reject);
+  });
 }
 
 /**
@@ -495,28 +1764,36 @@ router.get("/oembed", async (req: Request, res: Response) => {
   }
   try {
     const oembedUrl = `https://publish.twitter.com/oembed?url=${encodeURIComponent(url)}`;
-    const response = await fetch(oembedUrl, { headers: { Accept: "application/json" } });
+    const response = await fetchJsonInsecureDevOnly(oembedUrl);
     if (!response.ok) {
-      err(res, response.status === 404 ? 404 : 502, "Could not fetch tweet embed");
+      if (response.status === 404) {
+        err(res, 404, "Could not fetch tweet embed");
+        return;
+      }
+      oembedFallback(res, url, "embed_unavailable");
       return;
     }
-    const data = (await response.json()) as {
+    const data = response.json as {
       author_name?: string;
       author_url?: string;
       html?: string;
+      thumbnail_url?: string;
       width?: number;
     };
     const excerpt = data.html ? stripHtmlExcerpt(data.html) : "";
+    const imageUrl = data.thumbnail_url || (data.html ? extractOembedImage(data.html) : null);
     res.set("Cache-Control", "public, max-age=300");
     res.json({
       author_name: data.author_name ?? null,
       author_url: data.author_url ?? null,
       excerpt: excerpt || null,
+      thumbnail_url: imageUrl,
       width: data.width ?? null,
     });
   } catch (e) {
-    console.error("[API v1] oEmbed fetch error:", e);
-    err(res, 500, "Failed to fetch tweet embed");
+    const message = e instanceof Error ? e.message : String(e);
+    console.warn("[API v1] oEmbed unavailable:", message);
+    oembedFallback(res, url, "embed_fetch_failed");
   }
 });
 

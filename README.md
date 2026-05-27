@@ -41,7 +41,6 @@ teep/
   extension/     Chrome MV3 extension for supported social post tipping
   shared/        Shared helpers and types
   web/           Public app, dashboard, profiles, receipts, withdrawal UI
-  project-docs/  Architecture, security, release, and runbook documentation
   gasstation/    Gas sponsorship and wallet experimentation workspace
   sandbox/       Local experiments and smoke-test apps
 ```
@@ -236,17 +235,6 @@ npm audit --omit=dev --audit-level=high --workspaces
 - Backend attestations and referral signatures are produced server-side from protected keys.
 - Ops routes require `OPS_TOKEN` in production.
 - Local `.env` files are ignored by git. Do not commit secrets or generated private deployment data.
-
-## Documentation
-
-Deeper implementation and release notes live in `project-docs/`:
-
-- [System architecture](project-docs/architecture.md)
-- [Arc notes](project-docs/arc.md)
-- [Production beta checklist](project-docs/production-beta-left.md)
-- [Production beta checklist by part](project-docs/production-beta-checklist-by-part.md)
-- [Security audit](project-docs/security-audit-report.md)
-- [Incident response runbooks](project-docs/incident-response-runbooks.md)
 
 ## Status
 

@@ -60,6 +60,22 @@ interface WalletState {
 
 let walletState: WalletState = { address: null, isConnected: false };
 
+async function getCurrentTipperSettings() {
+  if (!walletState.address) return { defaultTipAmount: 5, receipts: { shareAmountEnabled: true, shareLinksEnabled: true, postAwareCopyEnabled: true } };
+  try {
+    const res = await fetch(`${CONFIG.API_BASE_URL}/api/v1/wallet/${walletState.address}/tipper-settings-public`);
+    if (!res.ok) throw new Error("settings unavailable");
+    const data = await res.json();
+    const amount = Number(data.defaultTipAmount || 5);
+    return {
+      defaultTipAmount: Number.isFinite(amount) && amount > 0 ? amount : 5,
+      receipts: data.receipts || { shareAmountEnabled: true, shareLinksEnabled: true, postAwareCopyEnabled: true },
+    };
+  } catch {
+    return { defaultTipAmount: 5, receipts: { shareAmountEnabled: true, shareLinksEnabled: true, postAwareCopyEnabled: true } };
+  }
+}
+
 type ActiveTipRequest = {
   requestId: string;
   windowId?: number;
@@ -184,6 +200,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     getUSDCBalance(walletState.address)
       .then((balance) => sendResponse({ balance }))
       .catch((err) => sendResponse({ error: err.message }));
+    return true;
+  }
+
+  if (message.type === "GET_CURRENT_USER_TIPPER_SETTINGS") {
+    if (!walletState.isConnected || !walletState.address) {
+      sendResponse({ error: "Not connected", defaultTipAmount: 5 });
+      return false;
+    }
+    getCurrentTipperSettings()
+      .then((settings) => sendResponse(settings))
+      .catch((err) => sendResponse({ error: err?.message || "Could not load settings", defaultTipAmount: 5 }));
     return true;
   }
 
@@ -363,6 +390,7 @@ async function handleTipRequest(payload: {
       data: tipCalldata,
     },
     from: walletState.address,
+    receiptPreferences: (await getCurrentTipperSettings()).receipts,
     signerSource: options.source,
     timestamp: Date.now(),
   };
@@ -391,6 +419,7 @@ async function handleTipRequest(payload: {
       const closeListener = (closedId: number) => {
         if (closedId !== windowId) return;
         chrome.windows.onRemoved.removeListener(closeListener);
+        if (!activeTipRequests.has(requestKey)) return;
         // Check if a result was stored (success or explicit failure)
         chrome.storage.local.get([resultKey], (result) => {
           if (!result[resultKey]) {

@@ -1,8 +1,10 @@
-import { createPublicClient, http, parseAbiItem, type Log } from "viem";
+import { parseAbiItem, type Log } from "viem";
 import { getDb } from "../db/database";
 import { getConfiguredChain, getRpcUrl } from "../config/chain";
 import { inspectTipForAbuse } from "./abuse";
 import { recordOpsEvent } from "./ops";
+import { createReceiptReadyNotification } from "./notifications";
+import { createBackendPublicClient, isInsecureRpcTlsEnabled, warnIfInsecureRpcTlsEnabled } from "./rpcClient";
 
 // ABI for the Tipped event
 const TIPPED_EVENT = parseAbiItem(
@@ -26,16 +28,14 @@ const RESCAN_BLOCKS = BigInt(process.env.INDEXER_RESCAN_BLOCKS || "100");
 // firewall/VPN, or free-tier throttling. Set RPC_TIMEOUT_MS in .env to increase (e.g. 30000).
 const RPC_TIMEOUT_MS = parseInt(process.env.RPC_TIMEOUT_MS || "30000", 10) || 30000;
 const RESET_TO_START_ON_BOOT = process.env.INDEXER_RESET_TO_START_ON_BOOT === "true";
+const ALLOW_INSECURE_RPC_TLS = isInsecureRpcTlsEnabled();
 
 export class Indexer {
   private client;
   private running = false;
 
   constructor() {
-    this.client = createPublicClient({
-      chain: CHAIN,
-      transport: http(RPC_URL, { timeout: RPC_TIMEOUT_MS }),
-    });
+    this.client = createBackendPublicClient({ url: RPC_URL, timeoutMs: RPC_TIMEOUT_MS });
   }
 
   async start(): Promise<void> {
@@ -46,6 +46,7 @@ export class Indexer {
 
     this.running = true;
     console.log(`[Indexer] Starting on ${CHAIN.name}, polling every ${POLL_INTERVAL}ms, RPC timeout ${RPC_TIMEOUT_MS}ms`);
+    if (ALLOW_INSECURE_RPC_TLS) warnIfInsecureRpcTlsEnabled("Indexer");
     console.log(`[Indexer] TipContract: ${TIP_CONTRACT_ADDRESS}`);
     console.log(`[Indexer] Factory:     ${FACTORY_ADDRESS}`);
     console.log(`[Indexer] Start block: ${START_BLOCK}, confirmations: ${CONFIRMATIONS}, rescan blocks: ${RESCAN_BLOCKS}`);
@@ -191,6 +192,13 @@ export class Indexer {
             toAddress: to,
             authorId,
             contentId,
+            amountRaw: amount,
+            txHash,
+          });
+          const metadata = db.prepare("SELECT author_handle FROM tip_metadata WHERE content_id = ? LIMIT 1").get(contentId) as { author_handle: string | null } | undefined;
+          createReceiptReadyNotification({
+            userAddress: from,
+            authorHandle: metadata?.author_handle || null,
             amountRaw: amount,
             txHash,
           });

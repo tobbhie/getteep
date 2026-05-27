@@ -77,6 +77,7 @@ export function initDb(): void {
       content_id TEXT NOT NULL,
       author_handle TEXT NOT NULL,
       tweet_id TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'post_tip',
       created_at TEXT DEFAULT (datetime('now')),
       UNIQUE(content_id)
     );
@@ -113,6 +114,40 @@ export function initDb(): void {
       referral_code TEXT NOT NULL,
       referred_at TEXT DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS user_settings (
+      address TEXT PRIMARY KEY,
+      username TEXT UNIQUE,
+      social_x_handle TEXT,
+      default_tip_amount TEXT NOT NULL DEFAULT '5.00',
+      receipt_share_links_enabled INTEGER NOT NULL DEFAULT 1,
+      receipt_share_amount_enabled INTEGER NOT NULL DEFAULT 1,
+      receipt_post_aware_copy_enabled INTEGER NOT NULL DEFAULT 1,
+      notify_creator_claimed INTEGER NOT NULL DEFAULT 1,
+      notify_low_balance INTEGER NOT NULL DEFAULT 1,
+      notify_receipt_ready INTEGER NOT NULL DEFAULT 0,
+      privacy_hide_address INTEGER NOT NULL DEFAULT 1,
+      privacy_private_activity INTEGER NOT NULL DEFAULT 1,
+      privacy_require_verification INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_user_settings_username ON user_settings(username);
+
+    CREATE TABLE IF NOT EXISTS user_notifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_address TEXT NOT NULL,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'unread',
+      metadata_json TEXT,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_user_notifications_user_created ON user_notifications(user_address, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_user_notifications_status ON user_notifications(user_address, status);
 
     CREATE TABLE IF NOT EXISTS post_milestones (
       content_id TEXT NOT NULL,
@@ -224,6 +259,12 @@ export function initDb(): void {
     CREATE INDEX IF NOT EXISTS idx_funding_provider_sessions_user_created ON funding_provider_sessions(user_address, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_funding_provider_sessions_provider ON funding_provider_sessions(provider, provider_session_id);
 
+    CREATE TABLE IF NOT EXISTS funding_sync_state (
+      user_address TEXT PRIMARY KEY,
+      last_block INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS funding_provider_webhooks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       provider TEXT NOT NULL,
@@ -249,6 +290,26 @@ export function initDb(): void {
   try {
     database.exec("ALTER TABLE verified_claims ADD COLUMN profile_image_url TEXT");
   } catch {}
+  try {
+    database.exec("ALTER TABLE tip_metadata ADD COLUMN kind TEXT NOT NULL DEFAULT 'post_tip'");
+  } catch {}
+  for (const statement of [
+    "ALTER TABLE user_settings ADD COLUMN default_tip_amount TEXT NOT NULL DEFAULT '5.00'",
+    "ALTER TABLE user_settings ADD COLUMN social_x_handle TEXT",
+    "ALTER TABLE user_settings ADD COLUMN receipt_share_links_enabled INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE user_settings ADD COLUMN receipt_share_amount_enabled INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE user_settings ADD COLUMN receipt_post_aware_copy_enabled INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE user_settings ADD COLUMN notify_creator_claimed INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE user_settings ADD COLUMN notify_low_balance INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE user_settings ADD COLUMN notify_receipt_ready INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE user_settings ADD COLUMN privacy_hide_address INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE user_settings ADD COLUMN privacy_private_activity INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE user_settings ADD COLUMN privacy_require_verification INTEGER NOT NULL DEFAULT 1",
+  ]) {
+    try {
+      database.exec(statement);
+    } catch {}
+  }
   try {
     database.exec("ALTER TABLE tips ADD COLUMN tip_contract_address TEXT");
   } catch {}

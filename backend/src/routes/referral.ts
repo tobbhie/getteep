@@ -1,12 +1,12 @@
 import { Router, Request, Response } from "express";
-import { createPublicClient, http } from "viem";
 import { getDb } from "../db/database";
 import crypto from "crypto";
 import { referralSignerService } from "../services/referralSigner";
-import { getConfiguredChain, getRpcUrl } from "../config/chain";
+import { getRpcUrl } from "../config/chain";
 import { isAddress } from "../utils/security";
 import { verifyWalletProof } from "../services/walletAuth";
 import { inspectReferralForAbuse } from "../services/abuse";
+import { createBackendPublicClient } from "../services/rpcClient";
 
 const router = Router();
 
@@ -209,8 +209,7 @@ router.get("/status/:address", async (req: Request, res: Response) => {
   const rpcUrl = getRpcUrl();
   if (registryAddress && rpcUrl) {
     try {
-      const chain = getConfiguredChain();
-      const client = createPublicClient({ chain, transport: http(rpcUrl) });
+      const client = createBackendPublicClient({ url: rpcUrl });
       const refOnChain = await client.readContract({
         address: registryAddress,
         abi: REGISTRY_ABI,

@@ -1,12 +1,13 @@
 import { Router, Request, Response } from "express";
 import crypto from "crypto";
-import { createPublicClient, http } from "viem";
 import { XOAuthService } from "../services/oauth";
 import { AttestationService } from "../services/attestation";
 import { getDb } from "../db/database";
 import { escapeHtml, isAddress, normalizeHandle } from "../utils/security";
-import { getConfiguredChain, getRpcUrl } from "../config/chain";
+import { getRpcUrl } from "../config/chain";
 import { createWalletChallenge, isWalletAuthPurpose, verifyWalletProof } from "../services/walletAuth";
+import { createBackendPublicClient } from "../services/rpcClient";
+import { createCreatorClaimedNotifications } from "../services/notifications";
 
 const FACTORY_ABI = [
   { name: "isDeployed", type: "function", stateMutability: "view", inputs: [{ name: "_authorId", type: "uint256" }], outputs: [{ type: "bool" }] },
@@ -25,10 +26,20 @@ const oauthService = new XOAuthService();
 const attestationService = new AttestationService();
 const ALLOW_UNSIGNED_ATTESTATION = process.env.ALLOW_UNSIGNED_ATTESTATION === "true";
 
+function creatorTipPredicate(alias = "t"): string {
+  return `(${alias}.author_id = ? OR LOWER(COALESCE(m.author_handle, '')) = LOWER(?))`;
+}
+
 // Temporary in-memory state for OAuth flows (short-lived, CSRF protection only)
 const pendingOAuthFlows = new Map<
   string,
-  { ownerAddress: string; codeVerifier: string; expiresAt: number }
+  {
+    ownerAddress: string;
+    codeVerifier: string;
+    expiresAt: number;
+    mode: "claim" | "refresh_profile";
+    expectedAuthorId?: string;
+  }
 >();
 
 function createPkcePair(): { codeVerifier: string; codeChallenge: string } {
@@ -63,9 +74,53 @@ router.post("/x/start", (req: Request, res: Response) => {
   const { codeVerifier, codeChallenge } = createPkcePair();
 
   pendingOAuthFlows.set(state, {
+    ownerAddress: ownerAddress.toLowerCase(),
+    codeVerifier,
+    expiresAt: Date.now() + 10 * 60 * 1000,
+    mode: "claim",
+  });
+
+  const authUrl = oauthService.getAuthUrl(state, codeChallenge);
+  res.json({ authUrl, state });
+});
+
+/**
+ * POST /auth/x/refresh-profile/start
+ * Starts a light X re-verification to refresh the current handle/profile for an
+ * already claimed creator account. This never creates a new claim wallet.
+ */
+router.post("/x/refresh-profile/start", (req: Request, res: Response) => {
+  const ownerAddress = String(req.body?.ownerAddress || "").toLowerCase();
+  const requestedAuthorId = typeof req.body?.authorId === "string" ? req.body.authorId.trim() : "";
+
+  if (!isAddress(ownerAddress)) {
+    res.status(400).json({ error: "Valid ownerAddress is required" });
+    return;
+  }
+
+  const db = getDb();
+  const claim = requestedAuthorId
+    ? db.prepare(
+        "SELECT author_id FROM verified_claims WHERE owner_address = ? AND author_id = ? ORDER BY verified_at DESC LIMIT 1"
+      ).get(ownerAddress, requestedAuthorId) as { author_id: string } | undefined
+    : db.prepare(
+        "SELECT author_id FROM verified_claims WHERE owner_address = ? ORDER BY verified_at DESC LIMIT 1"
+      ).get(ownerAddress) as { author_id: string } | undefined;
+
+  if (!claim) {
+    res.status(404).json({ error: "No verified X account found for this wallet" });
+    return;
+  }
+
+  const state = crypto.randomBytes(32).toString("hex");
+  const { codeVerifier, codeChallenge } = createPkcePair();
+
+  pendingOAuthFlows.set(state, {
     ownerAddress,
     codeVerifier,
     expiresAt: Date.now() + 10 * 60 * 1000,
+    mode: "refresh_profile",
+    expectedAuthorId: claim.author_id,
   });
 
   const authUrl = oauthService.getAuthUrl(state, codeChallenge);
@@ -119,6 +174,64 @@ router.get("/x/callback", async (req: Request, res: Response) => {
     // 2. Use X's stable numeric user ID for on-chain author identity.
     const authorId = authorIdFromXUserId(profile.id);
     const authorIdHash = authorId; // Backward-compatible local name for older logging paths.
+    const db = getDb();
+
+    if (flow.mode === "refresh_profile") {
+      if (flow.expectedAuthorId !== authorId) {
+        res.status(409).send(`
+          <html><body style="font-family:system-ui;padding:2rem;text-align:center;">
+            <h2>X account mismatch</h2>
+            <p>The X account you connected does not match the creator account already linked to this wallet.</p>
+            <p>No Teep profile details were changed.</p>
+          </body></html>
+        `);
+        return;
+      }
+
+      const update = db.prepare(
+        `UPDATE verified_claims
+         SET username = ?, display_name = ?, profile_image_url = ?, verified_at = datetime('now')
+         WHERE owner_address = ? AND author_id = ?`
+      ).run(
+        profile.username,
+        profile.name,
+        profile.profile_image_url ?? null,
+        flow.ownerAddress.toLowerCase(),
+        authorId
+      );
+
+      if (update.changes < 1) {
+        res.status(404).send(`
+          <html><body style="font-family:system-ui;padding:2rem;text-align:center;">
+            <h2>Creator account not found</h2>
+            <p>Teep could not find the linked creator account for this wallet.</p>
+          </body></html>
+        `);
+        return;
+      }
+
+      console.log(`[Auth] X profile refreshed: @${profile.username} (${profile.id}) -> ${flow.ownerAddress}`);
+
+      res.setHeader("Content-Type", "text/html");
+      res.send(`<!DOCTYPE html>
+<html><head><title>Teep - Profile Refreshed</title>
+<style>
+  body { background: #0a0a0a; color: #e5e5e5; font-family: -apple-system, system-ui, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+  .card { text-align: center; padding: 40px; background: #111; border-radius: 16px; border: 1px solid #1a1a2e; max-width: 420px; }
+  h1 { font-size: 24px; color: #00ba7c; margin-bottom: 8px; }
+  p { color: #71767b; font-size: 14px; line-height: 1.5; }
+  .handle { color: #1d9bf0; font-weight: 700; }
+  .hint { margin-top: 20px; font-size: 12px; color: #536471; }
+</style></head><body>
+<div class="card">
+  <h1>Profile refreshed</h1>
+  <p>Teep updated your creator profile to <span class="handle">@${escapeHtml(profile.username)}</span>.</p>
+  <p>Your tip wallet and creator account stayed the same.</p>
+  <p class="hint">You can return to Teep now.</p>
+</div>
+</body></html>`);
+      return;
+    }
 
     // 3. Create attestation (for on-chain claim wallet deployment)
     const attestation = await attestationService.createAttestation(
@@ -129,7 +242,22 @@ router.get("/x/callback", async (req: Request, res: Response) => {
     // 4. Store verified claim in database (source of truth)
     // author_id must match tips.author_id from the indexer (stable X numeric user ID)
     const authorIdForDb = authorId;
-    const db = getDb();
+    try {
+      db.prepare(
+        `UPDATE verified_claims
+         SET author_id = ?, username = ?, display_name = ?, profile_image_url = ?
+         WHERE owner_address = ? AND LOWER(username) = LOWER(?)`
+      ).run(
+        authorIdForDb,
+        profile.username,
+        profile.name,
+        profile.profile_image_url ?? null,
+        flow.ownerAddress.toLowerCase(),
+        profile.username
+      );
+    } catch {
+      /* Existing beta rows can be messy; the insert below remains the source of truth. */
+    }
 
     // One claim per X account (first claim wins) — prevent sybil: same X linked to multiple wallets
     const existing = db.prepare(
@@ -154,6 +282,11 @@ router.get("/x/callback", async (req: Request, res: Response) => {
       INSERT OR REPLACE INTO verified_claims (author_id, username, display_name, owner_address, profile_image_url)
       VALUES (?, ?, ?, ?, ?)
     `).run(authorIdForDb, profile.username, profile.name, flow.ownerAddress.toLowerCase(), profile.profile_image_url ?? null);
+    createCreatorClaimedNotifications({
+      authorId: authorIdForDb,
+      username: profile.username,
+      ownerAddress: flow.ownerAddress.toLowerCase(),
+    });
 
     console.log(`[Auth] Claim verified: @${profile.username} (${profile.id}) → ${flow.ownerAddress} [authorIdHash: ${authorIdHash}]`);
 
@@ -221,7 +354,7 @@ router.get("/claim-wallet-status/:address", async (req: Request, res: Response) 
   if (DEBUG) console.log("[Teep:Backend] claim-wallet-status request", { address: address.slice(0, 10) + "…" });
 
   const claim = db.prepare(
-    "SELECT author_id, username FROM verified_claims WHERE owner_address = ? LIMIT 1"
+    "SELECT author_id, username FROM verified_claims WHERE owner_address = ? ORDER BY verified_at DESC LIMIT 1"
   ).get(address) as { author_id: string; username: string } | undefined;
 
   if (!claim) {
@@ -231,10 +364,13 @@ router.get("/claim-wallet-status/:address", async (req: Request, res: Response) 
 
   const authorIdForChain = claim.author_id;
 
-  // Total earned (cumulative tips received for this creator); does not decrease on withdrawal. Use authorIdForChain to match indexer.
+  // Total earned (cumulative tips received for this creator); does not decrease on withdrawal.
+  // Include legacy hash-derived author IDs by matching the verified X handle in tip metadata.
   const totalEarnedRow = db.prepare(
-    "SELECT COALESCE(SUM(CAST(amount AS REAL)), 0) as total FROM tips WHERE author_id = ?"
-  ).get(authorIdForChain) as { total: number } | undefined;
+    `SELECT COALESCE(SUM(CAST(t.amount AS REAL)), 0) as total
+     FROM tips t LEFT JOIN tip_metadata m ON t.content_id = m.content_id
+     WHERE ${creatorTipPredicate("t")}`
+  ).get(authorIdForChain, claim.username) as { total: number } | undefined;
   const totalEarnedRaw = String(Math.round(totalEarnedRow?.total ?? 0));
 
   // Always use current factory's computeClaimWallet for where tips go (CREATE2 address receives even if not deployed).
@@ -247,11 +383,7 @@ router.get("/claim-wallet-status/:address", async (req: Request, res: Response) 
 
   if (factoryAddress && rpcUrl) {
     try {
-      const chain = getConfiguredChain();
-      const client = createPublicClient({
-        chain,
-        transport: http(rpcUrl),
-      });
+      const client = createBackendPublicClient({ url: rpcUrl });
       const authorIdBigInt = BigInt(authorIdForChain);
       const deployed = await client.readContract({
         address: factoryAddress,
@@ -294,11 +426,18 @@ router.get("/claim-wallet-status/:address", async (req: Request, res: Response) 
         }
       }
 
-      // All legacy addresses for this author (old factory claim wallets) so extension can sum USDC for Total Earned
+      // All legacy/alternate addresses for this author and owner so extension can sum
+      // USDC across pre-migration and post-migration claim wallets.
       const legacyRows = db.prepare(
         "SELECT wallet_address FROM claim_wallet_legacy WHERE author_id = ?"
       ).all(authorIdForChain) as Array<{ wallet_address: string }>;
-      const legacyClaimWalletAddresses = legacyRows.map((r) => r.wallet_address.toLowerCase());
+      const ownerWalletRows = db.prepare(
+        "SELECT wallet_address FROM claim_wallets WHERE LOWER(owner_address) = ?"
+      ).all(address) as Array<{ wallet_address: string }>;
+      const legacyClaimWalletAddresses = [
+        ...legacyRows.map((r) => r.wallet_address.toLowerCase()),
+        ...ownerWalletRows.map((r) => r.wallet_address.toLowerCase()),
+      ].filter((wallet, index, all) => wallet !== claimWalletAddress && all.indexOf(wallet) === index);
 
       res.json({
         deployed: !!deployed,
@@ -315,7 +454,19 @@ router.get("/claim-wallet-status/:address", async (req: Request, res: Response) 
   // Fallback when chain not configured: use indexer DB
   if (row) {
     if (DEBUG) console.log("[Teep:Backend] claim-wallet-status: from DB", { claimWalletAddress: row.wallet_address?.slice(0, 10) + "…" });
-    res.json({ deployed: true, claimWalletAddress: row.wallet_address, legacyClaimWalletAddresses: undefined, totalEarnedRaw });
+    const ownerWalletRows = db.prepare(
+      "SELECT wallet_address FROM claim_wallets WHERE LOWER(owner_address) = ?"
+    ).all(address) as Array<{ wallet_address: string }>;
+    const claimWalletAddress = row.wallet_address.toLowerCase();
+    const legacyClaimWalletAddresses = ownerWalletRows
+      .map((r) => r.wallet_address.toLowerCase())
+      .filter((wallet, index, all) => wallet !== claimWalletAddress && all.indexOf(wallet) === index);
+    res.json({
+      deployed: true,
+      claimWalletAddress: row.wallet_address,
+      legacyClaimWalletAddresses: legacyClaimWalletAddresses.length ? legacyClaimWalletAddresses : undefined,
+      totalEarnedRaw,
+    });
     return;
   }
 
@@ -416,6 +567,15 @@ router.get("/x/user/:username", async (req: Request, res: Response) => {
 
   try {
     const profile = await oauthService.getUserByUsername(username);
+    try {
+      getDb().prepare(
+        `UPDATE verified_claims
+         SET author_id = ?, username = ?, display_name = ?, profile_image_url = ?
+         WHERE LOWER(username) = LOWER(?)`
+      ).run(profile.id, profile.username, profile.name, profile.profile_image_url ?? null, username);
+    } catch {
+      /* best-effort identity reconciliation */
+    }
     res.set("Cache-Control", "public, max-age=300");
     res.json({
       id: profile.id,

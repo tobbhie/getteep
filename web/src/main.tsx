@@ -4,6 +4,7 @@ import { BrowserRouter } from "react-router-dom";
 import { PrivyProvider } from "@privy-io/react-auth";
 import { SmartWalletsProvider } from "@privy-io/react-auth/smart-wallets";
 import App from "./App";
+import { AccountRoleProvider } from "./context/AccountRoleContext";
 import { PRIVY_APP_ID } from "./config";
 import { arcTestnet } from "./chains";
 import "./index.css";
@@ -24,7 +25,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     >
       <SmartWalletsProvider>
         <BrowserRouter>
-          <App />
+          <AccountRoleProvider>
+            <App />
+          </AccountRoleProvider>
         </BrowserRouter>
       </SmartWalletsProvider>
     </PrivyProvider>

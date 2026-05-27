@@ -2,27 +2,33 @@
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
 import { encodeFunctionData, parseUnits } from "viem";
-import { buildFundingPolicy, getAvatarUrls } from "@teep/shared";
+import {
+  buildFundingPolicy,
+  getAvatarUrls,
+  getTeepActivityTitle,
+  getTeepActivityTypeLabel,
+  isTeepActivityPositive,
+} from "@teep/shared";
 import { formatUSDC } from "../utils/api";
 import { handleToAuthorId, parsePostUrl, computeContentId } from "../utils/contentId";
 import { CONFIG, TIP_PRESETS, FACTORY_ABI, CLAIM_WALLET_ABI, REFERRAL_REGISTRY_ABI, USDC_ABI } from "../utils/config";
 import { isDebug, debugLog, getDebugEntries, clearDebugEntries, addDebugListener, type DebugEntry } from "../utils/debug";
 import {
   getLocalTipAggregate,
-  normalizeActivityFrom,
   normalizeActivityTxHash,
-  rememberLocalTipSent,
   sumTipSentForOwner,
 } from "../utils/localTipLedger";
-function buildReceiptTweetText(params: { amount: string; authorHandle: string; tweetId?: string; txHash?: string; txUrl?: string }): string {
+function buildReceiptTweetText(params: { amount: string; authorHandle: string; tweetId?: string; txHash?: string; txUrl?: string; receiptPreferences?: { shareAmountEnabled?: boolean; shareLinksEnabled?: boolean; postAwareCopyEnabled?: boolean } }): string {
   const { amount, authorHandle, tweetId, txHash, txUrl } = params;
   const handle = authorHandle.replace(/^@/, "");
   const postUrl = tweetId ? `https://x.com/${handle}/status/${tweetId}` : "";
   const receiptUrl = txUrl || (txHash ? `${CONFIG.RECEIPT_BASE_URL}/tx/${txHash}` : CONFIG.WEB_APP_URL);
+  const amountPart = params.receiptPreferences?.shareAmountEnabled === false ? "" : ` $${amount}`;
+  const receiptPart = `\n\nReceipt: ${receiptUrl}`;
   const line1 = postUrl
-    ? `Hey @${handle}, just tipped you $${amount} via Teep for this wonderful piece: ${postUrl}`
-    : `Hey @${handle}, just tipped you $${amount} via Teep`;
-  return `${line1}\n\nReceipt: ${receiptUrl}\nSupport creators directly.`;
+    ? `Hey @${handle}, just tipped you${amountPart} via Teep for this wonderful piece: ${postUrl}`
+    : `Hey @${handle}, just tipped you${amountPart} via Teep`;
+  return `${line1}${receiptPart}\nSupport creators directly.`;
 }
 /** Map contract/viem revert errors to user-friendly tip failure message (e.g. insufficient funds). */
 function getTipErrorMessage(err: unknown): string {
@@ -193,9 +199,6 @@ function wrapCanvasText(ctx: CanvasRenderingContext2D, text: string, x: number, 
   }
   if (line) ctx.fillText(line, x, y);
 }
-// Detect if opened as signing window (?sign=tip)
-const urlParams = new URLSearchParams(window.location.search);
-const SIGNING_MODE = urlParams.get("sign") === "tip";
 type Screen = "loading" | "connect" | "dashboard" | "claim" | "withdraw" | "send" | "history" | "profile" | "grow";
 type Theme = "dark" | "light";
 const LIGHT_THEME = {
@@ -235,6 +238,12 @@ export const App: React.FC = () => {
     const [faucetLoading, setFaucetLoading] = useState(false);
     const [faucetMsg, setFaucetMsg] = useState<string>("");
     const [claimStatus, setClaimStatus] = useState<"idle" | "pending" | "success">("idle");
+    const [profileRefreshStatus, setProfileRefreshStatus] = useState<"idle" | "pending">("idle");
+    const [profileRefreshMsg, setProfileRefreshMsg] = useState("");
+    const [socialXHandle, setSocialXHandle] = useState("");
+    const [socialXHandleSaved, setSocialXHandleSaved] = useState("");
+    const [socialXHandleMsg, setSocialXHandleMsg] = useState("");
+    const [socialXHandleSaving, setSocialXHandleSaving] = useState(false);
     const [claimedUsername, setClaimedUsername] = useState<string>("");
     const [claimedAuthorId, setClaimedAuthorId] = useState<string>("");
     const [referralCode, setReferralCode] = useState("");
@@ -283,7 +292,7 @@ export const App: React.FC = () => {
     const [sendMsg, setSendMsg] = useState<string>("");
     // History screen state
     interface HistoryItem {
-      type: "tip_sent" | "tip_received" | "send" | "withdraw" | "withdraw_balance" | "referral_fee_received";
+      type: "tip_sent" | "direct_creator_tip" | "tip_received" | "send" | "withdraw" | "withdraw_balance" | "referral_fee_received" | "deposit" | "funding";
       amount: string;
       tx_hash?: string;
       timestamp: number;
@@ -388,332 +397,6 @@ export const App: React.FC = () => {
       } as any);
       return { message: challenge.message, signature };
     }, [walletAddress, effectiveSmartWalletClient]);
-    // ============================================================
-    // SIGNING MODE â€” Opened by background to sign a tip transaction
-    // ============================================================
-    const [pendingTip, setPendingTip] = useState<any>(null);
-    const [signStatus, setSignStatus] = useState<"loading" | "ready" | "approving" | "sending" | "success" | "error">("loading");
-    const [signError, setSignError] = useState<string>("");
-    const [signDiagnostic, setSignDiagnostic] = useState<string>("");
-    const [lastTipTxHash, setLastTipTxHash] = useState<string>("");
-    // Load pending tip in signing mode
-    useEffect(() => {
-      if (!SIGNING_MODE) return;
-      debugLog("SignTip", "Signing window: loading pendingTip from storage");
-      chrome.storage.local.get(["pendingTip"], (result) => {
-        if (result.pendingTip) {
-          debugLog("SignTip", "Signing window: pendingTip found", { contentId: result.pendingTip.contentId });
-          setPendingTip(result.pendingTip);
-          setSignStatus("ready");
-        } else {
-          debugLog("SignTip", "Signing window: no pendingTip in storage â€” user may have closed background or storage was cleared");
-          setSignStatus("error");
-          setSignError("No pending transaction found");
-        }
-      });
-    }, []);
-    useEffect(() => {
-      if (!SIGNING_MODE || !ready || !authenticated) return;
-      if (effectiveSmartWalletClient?.account?.address) {
-        setSignDiagnostic("");
-        return;
-      }
-      let cancelled = false;
-      const timeout = window.setTimeout(() => {
-        if (cancelled || effectiveSmartWalletClient?.account?.address) return;
-        const context = {
-          chainId: CONFIG.CHAIN_ID,
-          chainName: CONFIG.CHAIN_NAME,
-          walletCount: wallets.length,
-          embeddedWallet: safeAddress(embeddedWallet?.address),
-          hasSmartWalletClient: !!effectiveSmartWalletClient,
-          signingWindow: SIGNING_MODE,
-        };
-        debugLog("SignTip", "Timed out waiting for Arc smart wallet client", context);
-        setSignError("Smart wallet is not available for Arc in this window. Open the Teep popup once, wait for the dashboard, then try again.");
-        setSignDiagnostic(`No Privy smart wallet client was available. Chain ${CONFIG.CHAIN_ID} (${CONFIG.CHAIN_NAME}).`);
-        setSignStatus("error");
-      }, 15000);
-
-      debugLog("SignTip", "Requesting Privy Arc smart wallet client", {
-        chainId: CONFIG.CHAIN_ID,
-        chainName: CONFIG.CHAIN_NAME,
-        walletCount: wallets.length,
-        embeddedWallet: safeAddress(embeddedWallet?.address),
-      });
-
-      getClientForChain({ id: CONFIG.CHAIN_ID })
-        .then((client) => {
-          if (!cancelled && client) {
-            setArcSmartWalletClient(client);
-            setSignDiagnostic("");
-          }
-        })
-        .catch((err) => {
-          if (cancelled) return;
-          const context = {
-            chainId: CONFIG.CHAIN_ID,
-            chainName: CONFIG.CHAIN_NAME,
-            walletCount: wallets.length,
-            embeddedWallet: safeAddress(embeddedWallet?.address),
-            error: serializeError(err),
-            hint: getSmartWalletInitHint(err),
-          };
-          debugLog("SignTip", "getClientForChain failed before UserOp", context);
-          setSignError("Smart wallet could not initialize for Arc. Check Privy smart wallet network settings.");
-          setSignDiagnostic(getSmartWalletInitHint(err));
-          setSignStatus("error");
-        })
-        .finally(() => window.clearTimeout(timeout));
-
-      return () => {
-        cancelled = true;
-        window.clearTimeout(timeout);
-      };
-    }, [ready, authenticated, effectiveSmartWalletClient, getClientForChain, wallets.length, embeddedWallet?.address]);
-
-    // Execute the tip transaction via smart wallet (gas sponsored)
-    const executeSignedTip = useCallback(async () => {
-      debugLog("SignTip", "executeSignedTip called", { hasPendingTip: !!pendingTip, hasSmartWalletClient: !!effectiveSmartWalletClient });
-      if (!pendingTip) {
-        setSignError("No pending tip. Close and try again from the tweet.");
-        setSignStatus("error");
-        return;
-      }
-      if (!effectiveSmartWalletClient) {
-        const context = {
-          chainId: CONFIG.CHAIN_ID,
-          chainName: CONFIG.CHAIN_NAME,
-          walletCount: wallets.length,
-          embeddedWallet: safeAddress(embeddedWallet?.address),
-          hasSmartWalletClient: !!effectiveSmartWalletClient,
-        };
-        debugLog("SignTip", "Blocked: smart wallet client is null", context);
-        debugLog("SignTip", "Blocked: smart wallet client is null", context);
-        setSignError("Wallet not ready in this window. Wait a moment and try again, or open the main Teep popup first.");
-        setSignDiagnostic(`No Privy smart wallet client was available. Chain ${CONFIG.CHAIN_ID} (${CONFIG.CHAIN_NAME}).`);
-        setSignStatus("error");
-        return;
-      }
-      try {
-        setSignStatus("sending");
-        const calls: Array<{ to: `0x${string}`; data: `0x${string}`; value?: bigint }> = [];
-        if (pendingTip.needsApproval && pendingTip.approveData) {
-          calls.push({
-            to: pendingTip.approveData.to as `0x${string}`,
-            data: pendingTip.approveData.data as `0x${string}`,
-          });
-        }
-        calls.push({
-          to: pendingTip.tipData.to as `0x${string}`,
-          data: pendingTip.tipData.data as `0x${string}`,
-        });
-
-        const txHash = await effectiveSmartWalletClient.sendTransaction({
-          calls,
-          account: effectiveSmartWalletClient.account,
-        } as any);
-        debugLog("SignTip", "Tip tx sent", { txHash });
-        setLastTipTxHash(txHash);
-        setSignStatus("success");
-
-        await chrome.storage.local.set({
-          tipResult: {
-            contentId: pendingTip.contentId,
-            success: true,
-            txHash,
-            amount: pendingTip.amount,
-            timestamp: Date.now(),
-          },
-        });
-        await chrome.storage.local.remove("pendingTip");
-        chrome.runtime.sendMessage({ type: "TIP_TX_COMPLETE", payload: { success: true, txHash } }).catch(() => {});
-
-        const rawAmount = (Number(pendingTip.amount) * 1_000_000).toString();
-        const fromAddr = (effectiveSmartWalletClient.account?.address ?? "").toLowerCase();
-        await rememberLocalTipSent({
-          type: "tip_sent",
-          fromAddress: fromAddr,
-          amount: rawAmount,
-          tx_hash: txHash.toLowerCase(),
-          timestamp: Date.now(),
-          author_handle: pendingTip.authorHandle,
-          tweet_id: pendingTip.tweetId,
-          detail: pendingTip.authorHandle ? `Tipped @${pendingTip.authorHandle}` : "Tip sent",
-          local: true,
-        });
-        await Promise.allSettled([
-          fetch(`${CONFIG.API_BASE_URL}/tips/metadata`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contentId: pendingTip.contentId,
-              authorHandle: pendingTip.authorHandle,
-              tweetId: pendingTip.tweetId,
-            }),
-          }),
-          fetch(`${CONFIG.API_BASE_URL}/tips/activity`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              type: "tip_sent",
-              fromAddress: fromAddr,
-              amount: rawAmount,
-              txHash,
-              authorHandle: pendingTip.authorHandle,
-              tweetId: pendingTip.tweetId,
-              detail: pendingTip.authorHandle ? `Tipped @${pendingTip.authorHandle}` : "Tip sent",
-            }),
-          }),
-        ]);
-      } catch (err: any) {
-        debugLog("SignTip", "Tip tx error", serializeError(err));
-        setSignStatus("error");
-        const userMessage = getTipErrorMessage(err);
-        setSignError(userMessage);
-        await chrome.storage.local.set({
-          tipResult: {
-            contentId: pendingTip.contentId,
-            success: false,
-            error: userMessage,
-            timestamp: Date.now(),
-          },
-        });
-        await chrome.storage.local.remove("pendingTip");
-      }
-    }, [pendingTip, effectiveSmartWalletClient, wallets.length, embeddedWallet?.address]);
-
-    // Render signing mode UI
-    if (SIGNING_MODE) {
-      return (
-        <div style={S.app}>
-          <header style={S.header}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <span style={{ fontSize: "20px" }}>&#128176;</span>
-              <span style={{ fontSize: "18px", fontWeight: 700, color: "#fff" }}>Confirm Tip</span>
-            </div>
-          </header>
-          <main style={{ ...S.main, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "400px" }}>
-            {!ready ? (
-              <p style={S.loadingText}>Initializing wallet...</p>
-            ) : !authenticated || (!effectiveSmartWalletClient && signStatus !== "error") ? (
-              <div style={S.card}>
-                <p style={{ color: "#71767b", fontSize: "14px", textAlign: "center" as const }}>
-                  {!authenticated ? "Open Teep first to continue." : "Getting Teep ready..."}
-                </p>
-              </div>
-            ) : signStatus === "loading" ? (
-              <p style={S.loadingText}>Loading transaction...</p>
-            ) : signStatus === "error" ? (
-              <div style={{ ...S.card, borderColor: "rgba(244,33,46,0.3)" }}>
-                <div style={{ ...S.cardLabel, color: "#f4212e" }}>Transaction Failed</div>
-                <p style={{ color: "#e5e5e5", fontSize: "14px", lineHeight: 1.5 }}>{signError}</p>
-                {signDiagnostic && (
-                  <p style={{ color: "#71767b", fontSize: "12px", lineHeight: 1.45, marginTop: "8px" }}>
-                    {signDiagnostic}
-                  </p>
-                )}
-                <button onClick={() => window.close()} style={{ ...S.ghostBtn, marginTop: "12px" }}>Close</button>
-              </div>
-            ) : signStatus === "success" ? (
-              <div style={{ ...S.card, borderColor: "rgba(0,186,124,0.3)" }}>
-                <div style={{ textAlign: "center" as const }}>
-                  <div style={{ fontSize: "40px", marginBottom: "8px" }}>&#9989;</div>
-                  <div style={{ ...S.title, color: "#00ba7c" }}>Tip Sent!</div>
-                  <p style={{ color: "#71767b", fontSize: "13px" }}>
-                    ${pendingTip?.amount} USD to @{pendingTip?.authorHandle}
-                  </p>
-                  <a
-                    href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(
-                      buildReceiptTweetText({
-                        amount: pendingTip?.amount || "0",
-                        authorHandle: pendingTip?.authorHandle || "",
-                        tweetId: pendingTip?.tweetId,
-                        txHash: lastTipTxHash || undefined,
-                        txUrl: lastTipTxHash ? `${CONFIG.RECEIPT_BASE_URL}/tx/${lastTipTxHash}` : undefined,
-                      })
-                    )}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      display: "inline-block",
-                      marginTop: "12px",
-                      padding: "10px 16px",
-                      background: "#1d9bf0",
-                      color: "#fff",
-                      borderRadius: "10px",
-                      fontSize: "13px",
-                      fontWeight: 600,
-                      textDecoration: "none",
-                    }}
-                  >
-                    Share on X
-                  </a>
-                  <p style={{ color: "#536471", fontSize: "11px", marginTop: "8px" }}>This window will close in 10 seconds.</p>
-                </div>
-              </div>
-            ) : signStatus === "approving" ? (
-              <div style={S.card}>
-                <div style={{ textAlign: "center" as const }}>
-                  <p style={{ color: "#f6a623", fontSize: "15px", fontWeight: 700 }}>Approving USD...</p>
-                  <p style={{ color: "#71767b", fontSize: "13px", marginTop: "8px" }}>Please confirm in your wallet</p>
-                </div>
-              </div>
-            ) : signStatus === "sending" ? (
-              <div style={S.card}>
-                <div style={{ textAlign: "center" as const }}>
-                  <p style={{ color: "#1d9bf0", fontSize: "15px", fontWeight: 700 }}>Sending Tip...</p>
-                  <p style={{ color: "#71767b", fontSize: "13px", marginTop: "8px" }}>Transaction in progress</p>
-                </div>
-              </div>
-            ) : pendingTip ? (
-              <div style={{ width: "100%", maxWidth: "320px" }}>
-                <div style={{ ...S.card, marginBottom: "12px" }}>
-                  <div style={S.cardLabel}>Send Tip</div>
-                  <div style={{ fontSize: "32px", fontWeight: 700, color: "#fff", textAlign: "center" as const, margin: "12px 0" }}>
-                    ${pendingTip.amount} <span style={{ fontSize: "16px", color: "#71767b" }}>USD</span>
-                  </div>
-                  <div style={{ textAlign: "center" as const, color: "#71767b", fontSize: "14px" }}>
-                    to <span style={{ color: "#1d9bf0", fontWeight: 600 }}>@{pendingTip.authorHandle}</span>
-                  </div>
-                  {pendingTip.needsApproval && (
-                    <div style={{ textAlign: "center" as const, color: "#f6a623", fontSize: "11px", marginTop: "8px" }}>
-                      USD approval will be requested first
-                    </div>
-                  )}
-                </div>
-                <div style={{ display: "flex", flexDirection: "column" as const, gap: "8px" }}>
-                  <button onClick={executeSignedTip} style={S.primaryBtn}>
-                    Confirm &amp; Send
-                  </button>
-                  <button onClick={() => window.close()} style={S.ghostBtn}>
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            ) : null}
-            {isDebug() && (
-              <div style={{ marginTop: "12px", width: "100%", maxWidth: "320px" }}>
-                <button
-                  type="button"
-                  onClick={() => setDebugOpen(!debugOpen)}
-                  style={{ background: "transparent", border: "1px solid #2f3336", borderRadius: "8px", color: "#71767b", fontSize: "11px", padding: "6px 10px", cursor: "pointer", width: "100%", textAlign: "left" }}
-                >
-                  {debugOpen ? "v" : ">"} Debug ({debugEntries.length})
-                </button>
-                {debugOpen && (
-                  <div style={{ marginTop: "8px", maxHeight: "120px", overflow: "auto", background: "#111", borderRadius: "8px", padding: "8px", fontSize: "10px", fontFamily: "monospace", color: "#8b949e", whiteSpace: "pre-wrap" }}>
-                    {debugEntries.map((e, i) => (
-                      <div key={i} style={{ marginBottom: "4px" }}><span style={{ color: "#58a6ff" }}>[{e.tag}]</span> {e.message} {e.data != null ? JSON.stringify(e.data) : ""}</div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </main>
-        </div>
-      );
-    }
   // NORMAL MODE â€” Regular popup dashboard
   // ============================================================
   // React to Privy auth state â€” delay showing "connect" so returning users see loading then dashboard, not welcome flash
@@ -748,6 +431,8 @@ export const App: React.FC = () => {
         setClaimStatus("success");
         setClaimedUsername(data.claims[0].username);
         setClaimedAuthorId(data.claims[0].author_id || "");
+        setProfileRefreshStatus("idle");
+        setProfileRefreshMsg("");
         if (screen === "claim") {
           setScreen("dashboard");
         }
@@ -761,6 +446,15 @@ export const App: React.FC = () => {
     if (walletAddress) {
       checkClaimStatus(walletAddress);
     }
+  }, [walletAddress, checkClaimStatus]);
+  useEffect(() => {
+    const listener = (message: any) => {
+      if (message?.type === "CLAIM_VERIFIED" && walletAddress) {
+        checkClaimStatus(walletAddress);
+      }
+    };
+    chrome.runtime.onMessage.addListener(listener);
+    return () => chrome.runtime.onMessage.removeListener(listener);
   }, [walletAddress, checkClaimStatus]);
   // Load pending milestones for creator (so we can show "Your post crossed $X!")
   const loadPendingMilestones = useCallback(async (authorId: string) => {
@@ -912,25 +606,9 @@ export const App: React.FC = () => {
           if (!isDebug()) return;
           return addDebugListener(setDebugEntries);
         }, []);
-        const mergeLocalActivity = useCallback((backendHistory: HistoryItem[], localActivity: HistoryItem[], address: string) => {
-          const owner = address.toLowerCase();
-          const matchingLocal = localActivity.filter((item) => {
-            return item.type === "tip_sent" && normalizeActivityFrom(item) === owner;
-          });
-          const seen = new Set<string>();
-          const merged: HistoryItem[] = [];
-          for (const item of [...backendHistory, ...matchingLocal]) {
-            const txHash = normalizeActivityTxHash(item);
-            const key = txHash ? `tx:${txHash}` : `${item.type}:${item.timestamp}:${item.amount}:${item.author_handle || ""}`;
-            if (seen.has(key)) continue;
-            seen.add(key);
-            merged.push(item);
-          }
-          return merged.sort((a, b) => b.timestamp - a.timestamp).slice(0, 50);
-        }, []);
         const calculateTotalTippedFromHistory = useCallback((history: HistoryItem[]) => {
           return history.reduce((sum, item) => {
-            if (item.type !== "tip_sent") return sum;
+            if (item.type !== "tip_sent" && item.type !== "direct_creator_tip") return sum;
             try {
               return sum + BigInt(item.amount || "0");
             } catch {
@@ -939,7 +617,7 @@ export const App: React.FC = () => {
           }, 0n);
         }, []);
 
-        // Load tip history from backend, then merge local optimistic activity while indexer catches up.
+        // Load transaction history from backend-confirmed records.
         const loadHistory = useCallback(async (address: string) => {
           setHistoryLoading(true);
           let backendHistory: HistoryItem[] = [];
@@ -950,25 +628,15 @@ export const App: React.FC = () => {
           } catch {
             // silent
           }
-          chrome.storage.local.get(["localTipActivity"], (stored) => {
-            const localActivity = Array.isArray(stored.localTipActivity) ? stored.localTipActivity : [];
-            const merged = mergeLocalActivity(backendHistory, localActivity, address);
-            setTipHistory(merged);
-            const historyTotal = calculateTotalTippedFromHistory(merged);
-            getLocalTipAggregate(address).then((localAggregate) => {
-              setTotalTipped((prev) => {
-                const durableTotal = localAggregate > historyTotal ? localAggregate : historyTotal;
-                try {
-                  const current = BigInt(prev || "0");
-                  return durableTotal > current ? durableTotal.toString() : prev;
-                } catch {
-                  return durableTotal.toString();
-                }
-              });
-            });
-          });
+          const timestampSeconds = (value: number) => value > 1_000_000_000_000 ? Math.floor(value / 1000) : Math.floor(value || 0);
+          const normalizedHistory = backendHistory.map((item) => ({
+            ...item,
+            timestamp: timestampSeconds(item.timestamp),
+          }));
+          setTipHistory(normalizedHistory.sort((a, b) => b.timestamp - a.timestamp).slice(0, 50));
+          setTotalTipped(calculateTotalTippedFromHistory(backendHistory).toString());
           setHistoryLoading(false);
-        }, [mergeLocalActivity, calculateTotalTippedFromHistory]);
+        }, [calculateTotalTippedFromHistory]);
         // Load tip history when dashboard is shown (for Tipping History section)
         useEffect(() => {
           if (screen === "dashboard" && walletAddress) {
@@ -1024,6 +692,24 @@ export const App: React.FC = () => {
                 }
               })
               .catch(() => setReferrerStatus(null));
+          }, [screen, walletAddress]);
+
+          useEffect(() => {
+            if (screen !== "profile" || !walletAddress) return;
+            let cancelled = false;
+            fetch(`${CONFIG.API_BASE_URL}/wallet/${walletAddress}/settings`)
+              .then((r) => r.json())
+              .then((data) => {
+                if (cancelled) return;
+                const handle = data?.socialXHandle || "";
+                setSocialXHandle(handle);
+                setSocialXHandleSaved(handle);
+                setSocialXHandleMsg("");
+              })
+              .catch(() => {
+                if (!cancelled) setSocialXHandleMsg("Could not load your social handle.");
+              });
+            return () => { cancelled = true; };
           }, [screen, walletAddress]);
           // Load claim wallet info when entering withdraw screen (backend is source of truth for deployed + address)
           const loadClaimWalletInfo = useCallback(async () => {
@@ -1184,6 +870,58 @@ export const App: React.FC = () => {
       setClaimStatus("idle");
     }
   }, [walletAddress]);
+
+  const handleRefreshXProfile = useCallback(async () => {
+    if (!walletAddress || !claimedAuthorId) return;
+    setError("");
+    setProfileRefreshMsg("");
+    setProfileRefreshStatus("pending");
+    try {
+      const res = await fetch(`${CONFIG.API_BASE_URL}/auth/x/refresh-profile/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ownerAddress: walletAddress, authorId: claimedAuthorId }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.authUrl) {
+        throw new Error(data.error || "Could not start X profile refresh");
+      }
+      setProfileRefreshMsg("Complete the X check, then return here.");
+      chrome.tabs.create({ url: data.authUrl });
+    } catch (err: any) {
+      setError(err?.message || "Could not refresh X profile");
+      setProfileRefreshStatus("idle");
+    }
+  }, [walletAddress, claimedAuthorId]);
+
+  const handleSaveSocialXHandle = useCallback(async () => {
+    if (!walletAddress) return;
+    const normalized = socialXHandle.trim().replace(/^@/, "").toLowerCase();
+    if (normalized && !/^[a-z0-9_]{1,15}$/.test(normalized)) {
+      setSocialXHandleMsg("Use a valid X handle without spaces.");
+      return;
+    }
+    setSocialXHandleSaving(true);
+    setSocialXHandleMsg("");
+    try {
+      const walletProof = await createWalletProof("account-settings");
+      const res = await fetch(`${CONFIG.API_BASE_URL}/wallet/${walletAddress}/social-profile`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ socialXHandle: normalized, walletProof }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Could not save social handle");
+      const saved = data?.socialXHandle || "";
+      setSocialXHandle(saved);
+      setSocialXHandleSaved(saved);
+      setSocialXHandleMsg(saved ? "Social handle saved." : "Social handle removed.");
+    } catch (err: any) {
+      setSocialXHandleMsg(err?.message || "Could not save social handle.");
+    } finally {
+      setSocialXHandleSaving(false);
+    }
+  }, [walletAddress, socialXHandle, createWalletProof]);
   // Deploy claim wallet on-chain using the attestation from backend
   const handleDeployClaimWallet = useCallback(async () => {
     if (!walletAddress || !effectiveSmartWalletClient || !claimedUsername) return;
@@ -1488,6 +1226,9 @@ const cardTheme = isLight ? { background: T.card, border: `1px solid ${T.borderC
 const inputTheme = isLight ? { background: "#fff", color: T.text, border: `1px solid ${T.border}` } : {};
 const totalEarnedDisplay = formatUSDC(totalEarnedRaw || claimWalletBalance || "0");
 const totalTippedDisplay = formatUSDC(totalTipped || "0");
+const openWithdrawFlow = useCallback(() => {
+  setScreen(claimedUsername ? "withdraw" : "claim");
+}, [claimedUsername]);
 
 const iconPath = {
   add: "M12 5v14M5 12h14",
@@ -1513,14 +1254,11 @@ const Icon = ({ name, size = 20, color = "currentColor" }: { name: keyof typeof 
 
 const formatActivityAmount = (item: HistoryItem) => {
   const value = formatUSDC(item.amount || "0");
-  const positive = item.type === "tip_received" || item.type === "referral_fee_received";
+  const positive = isTeepActivityPositive(item.type);
   return `${positive ? "+" : "-"}${value}`;
 };
 const formatActivityTitle = (item: HistoryItem) => {
-  if (item.type === "tip_sent") return item.author_handle ? `You've tipped @${item.author_handle}` : "You've tipped a creator";
-  if (item.type === "tip_received") return "Tip received";
-  if (item.type === "referral_fee_received") return "Referral fee received";
-  return item.detail || item.type.replace(/_/g, " ");
+  return getTeepActivityTitle(item);
 };
 const formatActivityTime = (timestamp: number) => {
   if (!timestamp) return "Just now";
@@ -1537,7 +1275,7 @@ const getActivityCounterparty = (item: HistoryItem) => {
 };
 const buildActivityTweet = (item: HistoryItem) => {
   const amount = formatUSDC(item.amount || "0").replace(/^\$/, "");
-  if (item.type === "tip_sent" && item.author_handle) {
+  if ((item.type === "tip_sent" || item.type === "direct_creator_tip") && item.author_handle) {
     return buildReceiptTweetText({
       amount,
       authorHandle: item.author_handle,
@@ -1556,7 +1294,7 @@ const shareActivityOnX = (item: HistoryItem) => {
 const generateActivityReceipt = (item: HistoryItem) => {
   const amount = formatUSDC(item.amount || "0").replace(/^\$/, "");
   const counterparty = getActivityCounterparty(item);
-  const title = item.type === "tip_sent" ? "Creator tip sent" : item.type === "tip_received" ? "Creator tip received" : "Teep activity";
+  const title = getTeepActivityTypeLabel(item.type);
   const imageUrl = generateReceiptImage({
     amount,
     title,
@@ -1578,7 +1316,7 @@ const generateActivityReceipt = (item: HistoryItem) => {
   setTimeout(() => setReceiptMsg(""), 2400);
 };
 const renderActivityCard = (item: HistoryItem, index: number, compact = false) => {
-  const positive = item.type === "tip_received" || item.type === "referral_fee_received";
+  const positive = isTeepActivityPositive(item.type);
   const urls = getAvatarUrls(item.author_handle ?? "", item.author_handle || formatActivityTitle(item));
   return (
     <div key={`${item.tx_hash ?? item.timestamp}-${index}`} style={{ ...S.activityCard, ...(compact ? S.activityCardCompact : {}), background: appTone.card, borderColor: appTone.border, boxShadow: appTone.cardShadow }}>
@@ -1842,7 +1580,42 @@ return (
               </div>
               <button onClick={() => setScreen("claim")} style={{ ...S.primaryBtn, marginTop: "14px" }}>Verify X</button>
             </div>
-          ) : !claimWalletDeployed ? <div style={{ ...S.card, ...cardTheme }}><p style={{ color: T.muted, fontSize: "13px" }}>Set up your payout account once.</p><button onClick={handleDeployClaimWallet} disabled={deployLoading} style={S.primaryBtn}>{deployLoading ? "Setting up..." : "Set up payout account"}</button></div> : <div style={{ ...S.card, ...cardTheme }}><p style={{ color: T.text, fontSize: "13px" }}>Cash out your tips.</p><input value={withdrawTo} onChange={(e) => setWithdrawTo(e.target.value)} placeholder="Destination wallet" style={{ ...S.input, ...inputTheme, marginBottom: "8px" }} /><input value={withdrawAmount} onChange={(e) => setWithdrawAmount(e.target.value)} placeholder="Amount" style={{ ...S.input, ...inputTheme, marginBottom: "8px" }} /><button onClick={handleWithdraw} disabled={withdrawLoading} style={S.primaryBtn}>{withdrawLoading ? "Withdrawing..." : "Withdraw"}</button></div>}
+          ) : !claimWalletDeployed ? (
+            <div style={{ ...S.card, ...cardTheme, ...S.withdrawSetupCard }}>
+              <div style={S.withdrawSetupIconWrap}>
+                <Icon name="wallet" size={19} color={T.primary} />
+              </div>
+              <div style={S.withdrawSetupCopy}>
+                <div style={{ ...S.cardLabel, color: T.muted }}>Payout setup</div>
+                <h3 style={{ ...S.withdrawSetupTitle, color: T.text }}>Create your payout account</h3>
+                <p style={{ ...S.withdrawSetupText, color: T.muted }}>
+                  Set this up once to receive and withdraw tips sent to your verified creator posts.
+                </p>
+              </div>
+              <button
+                onClick={handleDeployClaimWallet}
+                disabled={deployLoading}
+                style={{ ...S.primaryBtn, ...S.withdrawSetupBtn, opacity: deployLoading ? 0.75 : 1 }}
+              >
+                {deployLoading ? "Setting up..." : "Set up payout account"}
+              </button>
+            </div>
+          ) : (
+            <div style={{ ...S.card, ...cardTheme, ...S.withdrawFormCard }}>
+              <div style={S.withdrawFormHeader}>
+                <div>
+                  <div style={{ ...S.cardLabel, color: T.muted }}>Cash out</div>
+                  <p style={{ ...S.withdrawSetupText, color: T.text, marginTop: "6px" }}>Withdraw your available creator tips.</p>
+                </div>
+                <button type="button" onClick={() => setWithdrawAmount(formatUSDC(claimWalletBalance).replace("$", ""))} style={{ ...S.smallBtn, ...S.withdrawMaxBtn }}>
+                  Max
+                </button>
+              </div>
+              <input value={withdrawTo} onChange={(e) => setWithdrawTo(e.target.value)} placeholder="Destination wallet" style={{ ...S.input, ...inputTheme, marginBottom: "10px" }} />
+              <input value={withdrawAmount} onChange={(e) => setWithdrawAmount(e.target.value)} placeholder="Amount" style={{ ...S.input, ...inputTheme, marginBottom: "14px" }} />
+              <button onClick={handleWithdraw} disabled={withdrawLoading} style={S.primaryBtn}>{withdrawLoading ? "Withdrawing..." : "Withdraw"}</button>
+            </div>
+          )}
           {withdrawMsg && <p style={{ color: T.muted, fontSize: "12px" }}>{withdrawMsg}</p>}
         </SubPage>
       )}
@@ -1908,7 +1681,44 @@ return (
               <span style={{ ...S.addressText, color: T.text }}>{walletAddress || "Wallet loading..."}</span>
               <button type="button" onClick={handleReceiveCrypto} style={S.copyBtn}>{walletCopyFeedback ? "Copied" : "Copy"}</button>
             </div>
-            {!claimedUsername && <button type="button" onClick={() => setScreen("claim")} style={{ ...S.primaryBtn, marginTop: "12px" }}>Verify X</button>}
+            {claimedUsername ? (
+              <>
+                <button type="button" onClick={handleRefreshXProfile} disabled={profileRefreshStatus === "pending"} style={{ ...S.primaryBtn, marginTop: "12px" }}>
+                  {profileRefreshStatus === "pending" ? "Waiting for X..." : "Refresh X profile"}
+                </button>
+                <p style={{ color: T.muted, fontSize: "12px", lineHeight: 1.45, margin: "8px 0 0" }}>
+                  Use this after changing your X handle. Your creator account and tip wallet stay the same.
+                </p>
+                {profileRefreshMsg && <p style={{ color: T.success, fontSize: "12px", margin: "8px 0 0" }}>{profileRefreshMsg}</p>}
+              </>
+            ) : (
+              <button type="button" onClick={() => setScreen("claim")} style={{ ...S.primaryBtn, marginTop: "12px" }}>Verify X</button>
+            )}
+            {error && <p style={S.error}>{error}</p>}
+          </div>
+          <div style={{ ...S.card, ...cardTheme }}>
+            <div style={{ ...S.cardLabel, color: T.muted }}>Public social handle</div>
+            <p style={{ color: T.muted, fontSize: "12px", lineHeight: 1.45, margin: "0 0 10px" }}>
+              Used when creators thank you from their supporter list. Leave empty if you prefer wallet-only privacy.
+            </p>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <span style={{ color: T.muted, fontSize: "13px", fontWeight: 900 }}>@</span>
+              <input
+                value={socialXHandle}
+                onChange={(e) => setSocialXHandle(e.target.value)}
+                placeholder="x_handle"
+                style={{ ...S.input, ...inputTheme, marginBottom: 0 }}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleSaveSocialXHandle}
+              disabled={socialXHandleSaving || socialXHandle.trim().replace(/^@/, "").toLowerCase() === socialXHandleSaved}
+              style={{ ...S.primaryBtn, marginTop: "10px", opacity: socialXHandleSaving ? 0.72 : 1 }}
+            >
+              {socialXHandleSaving ? "Saving..." : "Save social handle"}
+            </button>
+            {socialXHandleMsg && <p style={{ color: socialXHandleMsg.includes("Could not") || socialXHandleMsg.includes("valid") ? "#f4212e" : T.success, fontSize: "12px", margin: "8px 0 0" }}>{socialXHandleMsg}</p>}
           </div>
           <div style={{ ...S.card, ...cardTheme }}>
             <button type="button" onClick={() => setReferralExpanded((open) => !open)} style={{ ...S.submenuHeader, color: T.text }}>
@@ -1945,7 +1755,7 @@ return (
       <footer style={{ ...S.popupFooter, background: appTone.footer, borderTop: `1px solid ${appTone.border}` }}>
         <div style={S.footerGrid}>
           <FooterButton label="Dashboard" icon="grid" href={`${CONFIG.WEB_APP_URL}/dashboard`} T={T} Icon={Icon} dark={!isLight} />
-          <FooterButton label="Withdraw" icon="wallet" onClick={() => setScreen("withdraw")} T={T} Icon={Icon} dark={!isLight} />
+          <FooterButton label="Withdraw" icon="wallet" onClick={openWithdrawFlow} T={T} Icon={Icon} dark={!isLight} />
           <FooterButton label="Grow Tips" icon="leaf" onClick={() => setScreen("grow")} T={T} Icon={Icon} accent dark={!isLight} />
           <FooterButton label="Support" icon="help" href={`${CONFIG.WEB_APP_URL}/support`} T={T} Icon={Icon} dark={!isLight} />
         </div>
@@ -2020,6 +1830,15 @@ const S: Record<string, React.CSSProperties> = {
   activityActionBtn: { border: "none", background: "transparent", padding: "0", display: "flex", alignItems: "center", gap: "2px", fontSize: "9px", fontWeight: 800, cursor: "pointer", fontFamily: font, opacity: 0.9, transition: "color 140ms ease, opacity 140ms ease" },
   historyList: { display: "flex", flexDirection: "column", gap: "8px" },
   card: { padding: "16px", background: "#111", borderRadius: "14px", border: "1px solid #1a1a2e", marginBottom: "0" },
+  withdrawSetupCard: { display: "flex", flexDirection: "column" as const, gap: "16px", padding: "18px 16px 16px" },
+  withdrawSetupIconWrap: { width: "42px", height: "42px", borderRadius: "14px", display: "grid", placeItems: "center", background: "rgba(99,36,235,0.16)", border: "1px solid rgba(99,36,235,0.30)" },
+  withdrawSetupCopy: { display: "flex", flexDirection: "column" as const, gap: "7px" },
+  withdrawSetupTitle: { margin: 0, fontSize: "17px", lineHeight: 1.15, fontWeight: 850, letterSpacing: 0 },
+  withdrawSetupText: { margin: 0, fontSize: "13px", lineHeight: 1.5 },
+  withdrawSetupBtn: { marginTop: "2px" },
+  withdrawFormCard: { padding: "18px 16px 16px" },
+  withdrawFormHeader: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px", marginBottom: "14px" },
+  withdrawMaxBtn: { width: "auto", minWidth: "54px", padding: "7px 10px", borderRadius: "10px" },
   title: { fontSize: "20px", fontWeight: 800, color: "#fff", marginBottom: "6px", textAlign: "center" },
   subtitle: { fontSize: "13px", color: "#71767b", lineHeight: 1.5, marginBottom: "18px", textAlign: "center" },
   primaryBtn: { width: "100%", padding: "12px", border: "none", borderRadius: "12px", background: "#6324eb", color: "#fff", fontSize: "15px", fontWeight: 800, cursor: "pointer", fontFamily: font },

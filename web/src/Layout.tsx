@@ -18,7 +18,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const isDashboard = location.pathname.startsWith("/dashboard");
+  const isDashboard = location.pathname.startsWith("/dashboard") || location.pathname.startsWith("/creator");
   const isReceipt = location.pathname.startsWith("/tx");
   const isHome = location.pathname === "/";
   const hideGlobalNav = isDashboard || isReceipt;
@@ -49,6 +49,26 @@ export default function Layout({ children }: { children: ReactNode }) {
   const avatarUrl = googlePicture ?? twitterPicture ?? avatarUrls.primary;
 
   const closeMobile = () => setMobileNavOpen(false);
+  const focusHashTarget = (hash: string) => {
+    if (typeof window === "undefined") return;
+    window.setTimeout(() => {
+      const id = hash.replace(/^#/, "");
+      const target = document.getElementById(id);
+      if (!target) return;
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (!target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
+      target.focus({ preventScroll: true });
+    }, 0);
+  };
+  const handleHashLinkClick = (hash: string) => {
+    closeMobile();
+    if (location.pathname === "/" && location.hash === hash) focusHashTarget(hash);
+  };
+
+  useEffect(() => {
+    if (!location.hash) return;
+    focusHashTarget(location.hash);
+  }, [location.pathname, location.hash]);
 
   return (
     <div className="layout">
@@ -62,9 +82,9 @@ export default function Layout({ children }: { children: ReactNode }) {
               <span>Teep</span>
             </Link>
             <nav className="layout-nav layout-nav--center layout-nav--desktop" aria-label="Main">
-              <Link to="/#how-it-works">How it works</Link>
-              <Link to="/leaderboard">Stats</Link>
-              <Link to="/#faq">FAQ</Link>
+              <Link to="/#how-it-works" onClick={() => handleHashLinkClick("#how-it-works")}>How it works</Link>
+              <Link to="/#stats" onClick={() => handleHashLinkClick("#stats")}>Stats</Link>
+              <Link to="/#faq" onClick={() => handleHashLinkClick("#faq")}>FAQ</Link>
             </nav>
             <div className="layout-header-right layout-header-right--desktop">
               {ready && authenticated ? (
@@ -158,9 +178,9 @@ export default function Layout({ children }: { children: ReactNode }) {
               </button>
             </div>
             <nav className="layout-mobile-menu-nav" aria-label="Main">
-              <Link to="/#how-it-works" onClick={closeMobile}>How it works</Link>
-              <Link to="/leaderboard" onClick={closeMobile}>Stats</Link>
-              <Link to="/#faq" onClick={closeMobile}>FAQ</Link>
+              <Link to="/#how-it-works" onClick={() => handleHashLinkClick("#how-it-works")}>How it works</Link>
+              <Link to="/#stats" onClick={() => handleHashLinkClick("#stats")}>Stats</Link>
+              <Link to="/#faq" onClick={() => handleHashLinkClick("#faq")}>FAQ</Link>
             </nav>
             <div className="layout-mobile-menu-footer">
               {ready && authenticated ? (
@@ -210,8 +230,8 @@ export default function Layout({ children }: { children: ReactNode }) {
             <div className="layout-footer-links">
               <a href={DOCS_URL} target="_blank" rel="noopener noreferrer">Docs</a>
               <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
-              <Link to="/#developers">Developers</Link>
-              <Link to="/leaderboard">Stats</Link>
+              <Link to="/support">Support</Link>
+              <Link to="/#stats" onClick={() => handleHashLinkClick("#stats")}>Stats</Link>
             </div>
             <div className="layout-footer-social">
               <a href={TWITTER_URL} target="_blank" rel="noopener noreferrer" aria-label="Twitter">Twitter</a>

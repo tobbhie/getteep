@@ -66,6 +66,20 @@ export const TipButton: React.FC<TipButtonProps> = ({ tweetId, authorHandle }) =
       .catch(() => {});
   }, [applyTipTotals, contentId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    chrome.runtime.sendMessage({ type: "GET_CURRENT_USER_TIPPER_SETTINGS" }, (res: { defaultTipAmount?: number }) => {
+      if (cancelled) return;
+      const amount = Number(res?.defaultTipAmount || 0);
+      if (Number.isFinite(amount) && amount > 0) {
+        setSelectedAmount(amount);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Position the panel relative to the button; show above if not enough space below
   const PANEL_ESTIMATE_HEIGHT = 340;
   const PANEL_WIDTH = 250;

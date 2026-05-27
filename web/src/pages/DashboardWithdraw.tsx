@@ -1,12 +1,13 @@
 import { useEffect, useState, useCallback } from "react";
-import { Link } from "react-router-dom";
-import { usePrivy, useWallets } from "@privy-io/react-auth";
+import { Link, useLocation } from "react-router-dom";
+import { usePrivy } from "@privy-io/react-auth";
 import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
 import { parseUnits } from "viem";
 import { buildFundingPolicy } from "@teep/shared";
 import { arcTestnet } from "../chains";
 import { API_BASE, ENABLE_FIAT_OFFRAMP, ENABLE_FIAT_ONRAMP, FAUCET_URL, FUNDING_ENV, OFFRAMP_URL, ONRAMP_URL, REFERRAL_REGISTRY_ADDRESS, USDC_ADDRESS } from "../config";
 import { encodeWithdrawCall, encodeWithdrawWithAuthorizationCall, encodeWithdrawWithFeeCall, encodeTransferCall } from "../lib/contracts";
+import DashboardShell from "../components/DashboardShell";
 
 function formatUsd(raw: string): string {
   const n = Number(raw);
@@ -14,26 +15,22 @@ function formatUsd(raw: string): string {
   return (n / 1e6).toFixed(2);
 }
 
-const primary = "#6324eb";
-const success = "var(--success, #10B981)";
+function shortAddress(value: string | null | undefined): string {
+  if (!value) return "Not available";
+  return `${value.slice(0, 6)}...${value.slice(-4)}`;
+}
+
+const primary = "var(--accent)";
+const success = "var(--metric-positive)";
+const danger = "var(--danger)";
 
 export default function DashboardWithdraw() {
+  const { pathname } = useLocation();
   const { ready, authenticated, login, user } = usePrivy();
-  const { wallets } = useWallets();
   const { client: smartWalletClient } = useSmartWallets();
-  const embeddedWallet = wallets.find((w) => w.walletClientType === "privy");
-  const linkedAccounts = (user as { linkedAccounts?: Array<{ type?: string; address?: string }> } | null)?.linkedAccounts ?? [];
-  const addressFromLinked =
-    linkedAccounts.find((a) => a?.type === "smart_wallet" && a?.address)?.address ||
-    linkedAccounts.find((a) => a?.type === "wallet" && a?.address)?.address ||
-    (linkedAccounts.find((a) => a?.address?.startsWith?.("0x"))?.address ?? "");
-  const address = (
-    smartWalletClient?.account?.address ||
-    embeddedWallet?.address ||
-    (user?.wallet as { address?: string } | undefined)?.address ||
-    addressFromLinked ||
-    ""
-  ).toLowerCase();
+  const liveAddress = (ready && authenticated ? smartWalletClient?.account?.address || "" : "").toLowerCase();
+  const [stableAddress, setStableAddress] = useState("");
+  const address = liveAddress || stableAddress;
 
   const [claimStatus, setClaimStatus] = useState<{
     verified: boolean;
@@ -42,7 +39,9 @@ export default function DashboardWithdraw() {
   const [walletStatus, setWalletStatus] = useState<{
     deployed: boolean;
     claimWalletAddress: string | null;
+    legacyClaimWalletAddresses?: string[];
   } | null>(null);
+  const [claimWalletBalances, setClaimWalletBalances] = useState<Array<{ address: string; balanceRaw: string }>>([]);
   const [tipBalance, setTipBalance] = useState<string>("0");
   const [tipsEarnedBalance, setTipsEarnedBalance] = useState<string>("0");
   const [withdrawalSource, setWithdrawalSource] = useState<"tipBalance" | "tipsEarned">("tipBalance");
@@ -63,8 +62,20 @@ export default function DashboardWithdraw() {
 
   const hasClaim = claimStatus?.verified && claimStatus?.claims?.[0]?.username;
   const isDeployed = walletStatus?.deployed;
-  const claimAddr = walletStatus?.claimWalletAddress;
+  const claimAddr = walletStatus?.claimWalletAddress || walletStatus?.legacyClaimWalletAddresses?.[0] || null;
   const canUseTipsEarned = hasClaim && isDeployed && claimAddr;
+
+  useEffect(() => {
+    if (liveAddress) setStableAddress(liveAddress);
+  }, [liveAddress]);
+
+  const selectWithdrawalSource = useCallback((source: "tipBalance" | "tipsEarned") => {
+    setWithdrawalSource(source);
+    setWithdrawAmount("");
+    setBreakdown(null);
+    setMsg(null);
+  }, []);
+
   const createWalletProof = useCallback(async (purpose: string) => {
     if (!address || !smartWalletClient) {
       throw new Error("Wallet not ready");
@@ -98,6 +109,7 @@ export default function DashboardWithdraw() {
       setWalletStatus({
         deployed: walletRes.deployed,
         claimWalletAddress: walletRes.claimWalletAddress || null,
+        legacyClaimWalletAddresses: Array.isArray(walletRes.legacyClaimWalletAddresses) ? walletRes.legacyClaimWalletAddresses : [],
       });
       setTipBalance(tipBalanceRes.balanceRaw || "0");
 
@@ -105,14 +117,26 @@ export default function DashboardWithdraw() {
       if (tipsEarnedRes?.ok) {
         const data = await tipsEarnedRes.json();
         setTipsEarnedBalance(data.balanceRaw || "0");
+        setClaimWalletBalances(
+          Array.isArray(data.claimWalletBalances)
+            ? data.claimWalletBalances
+                .map((wallet: { address?: string; balanceRaw?: string }) => ({
+                  address: String(wallet.address || "").toLowerCase(),
+                  balanceRaw: String(wallet.balanceRaw || "0"),
+                }))
+                .filter((wallet: { address: string; balanceRaw: string }) => /^0x[a-f0-9]{40}$/.test(wallet.address) && /^[0-9]+$/.test(wallet.balanceRaw))
+            : []
+        );
       } else {
         setTipsEarnedBalance("0");
+        setClaimWalletBalances([]);
       }
     } catch {
       setClaimStatus(null);
       setWalletStatus(null);
       setTipBalance("0");
       setTipsEarnedBalance("0");
+      setClaimWalletBalances([]);
     } finally {
       setLoading(false);
     }
@@ -124,6 +148,22 @@ export default function DashboardWithdraw() {
 
   const activeBalance = withdrawalSource === "tipBalance" ? tipBalance : tipsEarnedBalance;
   const activeBalanceUsd = formatUsd(activeBalance);
+  const parsedWithdrawAmount = (() => {
+    if (!withdrawAmount.trim()) return null;
+    try {
+      return parseUnits(withdrawAmount, 6);
+    } catch {
+      return null;
+    }
+  })();
+  const amountExceedsActiveBalance = parsedWithdrawAmount !== null && parsedWithdrawAmount > BigInt(activeBalance || "0");
+  const selectedClaimWalletForAmount =
+    withdrawalSource === "tipsEarned" && parsedWithdrawAmount !== null
+      ? claimWalletBalances.find((wallet) => BigInt(wallet.balanceRaw) >= parsedWithdrawAmount)?.address || claimAddr
+      : claimAddr;
+  const selectedClaimWalletBalance = selectedClaimWalletForAmount
+    ? claimWalletBalances.find((wallet) => wallet.address === selectedClaimWalletForAmount.toLowerCase())?.balanceRaw || tipsEarnedBalance
+    : "0";
 
   useEffect(() => {
     if (!address || withdrawalSource !== "tipsEarned" || !withdrawAmount.trim()) {
@@ -169,16 +209,25 @@ export default function DashboardWithdraw() {
       setMsg({ text: "Enter a valid amount", ok: false });
       return;
     }
-    const rawAmount = parseUnits(withdrawAmount, 6);
+    let rawAmount: bigint;
+    try {
+      rawAmount = parseUnits(withdrawAmount, 6);
+    } catch {
+      setMsg({ text: "Enter a valid USDC amount", ok: false });
+      return;
+    }
     const dest = withdrawTo.trim() as `0x${string}`;
+    if (rawAmount > BigInt(activeBalance || "0")) {
+      setMsg({
+        text: withdrawalSource === "tipsEarned" ? "Amount exceeds your tips earned balance" : "Amount exceeds your tip balance",
+        ok: false,
+      });
+      return;
+    }
 
     if (withdrawalSource === "tipBalance") {
       if (!address || !smartWalletClient) {
         setMsg({ text: "Connect your wallet to withdraw", ok: false });
-        return;
-      }
-      if (rawAmount > BigInt(tipBalance)) {
-        setMsg({ text: "Amount exceeds your tip balance", ok: false });
         return;
       }
     setSubmitting(true);
@@ -245,7 +294,7 @@ export default function DashboardWithdraw() {
         setWithdrawTo("");
         setWithdrawAmount("");
         setBreakdown(null);
-        setTimeout(loadData, 3000);
+        window.setTimeout(() => { void loadData(); }, 3000);
       } catch (err: unknown) {
         const e = err as { shortMessage?: string; message?: string };
         setMsg({ text: e.shortMessage || e.message || "Withdrawal failed", ok: false });
@@ -257,10 +306,6 @@ export default function DashboardWithdraw() {
     if (withdrawalSource === "tipsEarned") {
       if (!address || !smartWalletClient || !claimAddr) {
         setMsg({ text: "Verify your account to withdraw tips earned", ok: false });
-        return;
-      }
-      if (rawAmount > BigInt(tipsEarnedBalance)) {
-        setMsg({ text: "Amount exceeds your tips earned balance", ok: false });
         return;
       }
     }
@@ -304,10 +349,21 @@ export default function DashboardWithdraw() {
         setSubmitting(false);
         return;
       }
+      const withdrawalClaimAddr =
+        claimWalletBalances.find((wallet) => BigInt(wallet.balanceRaw) >= rawAmount)?.address ||
+        (claimAddr && BigInt(claimWalletBalances.find((wallet) => wallet.address === claimAddr.toLowerCase())?.balanceRaw || tipsEarnedBalance || "0") >= rawAmount ? claimAddr.toLowerCase() : null);
+      if (!withdrawalClaimAddr) {
+        setMsg({
+          text: "That amount is split across claim wallets. Withdraw a smaller amount, then withdraw the rest.",
+          ok: false,
+        });
+        setSubmitting(false);
+        return;
+      }
       const confirmRes = await fetch(`${API_BASE}/withdrawal/confirm`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ requestId: confirmation.requestId, code: confirmationCode }),
+        body: JSON.stringify({ requestId: confirmation.requestId, code: confirmationCode, claimWalletAddress: withdrawalClaimAddr }),
       });
       const confirmData = await confirmRes.json();
       if (!confirmRes.ok || !confirmData.confirmed) {
@@ -327,7 +383,7 @@ export default function DashboardWithdraw() {
             })
           : encodeWithdrawWithFeeCall(dest, rawAmount);
         txHash = await smartWalletClient!.sendTransaction({
-          calls: [{ to: claimAddr as `0x${string}`, data }],
+          calls: [{ to: withdrawalClaimAddr as `0x${string}`, data }],
           chain: arcTestnet,
           account: smartWalletClient!.account,
         } as any);
@@ -340,13 +396,13 @@ export default function DashboardWithdraw() {
 
         const calls: Array<{ to: `0x${string}`; data: `0x${string}` }> = [];
         if (netAmount > 0n) {
-          calls.push({ to: claimAddr as `0x${string}`, data: encodeWithdrawCall(dest, netAmount) });
+          calls.push({ to: withdrawalClaimAddr as `0x${string}`, data: encodeWithdrawCall(dest, netAmount) });
         }
         if (protocolAmount > 0n && protocolTreasury && protocolTreasury !== "0x0000000000000000000000000000000000000000") {
-          calls.push({ to: claimAddr as `0x${string}`, data: encodeWithdrawCall(protocolTreasury as `0x${string}`, protocolAmount) });
+          calls.push({ to: withdrawalClaimAddr as `0x${string}`, data: encodeWithdrawCall(protocolTreasury as `0x${string}`, protocolAmount) });
         }
         if (referrerAmount > 0n && referrerAddr && referrerAddr !== "0x0000000000000000000000000000000000000000") {
-          calls.push({ to: claimAddr as `0x${string}`, data: encodeWithdrawCall(referrerAddr as `0x${string}`, referrerAmount) });
+          calls.push({ to: withdrawalClaimAddr as `0x${string}`, data: encodeWithdrawCall(referrerAddr as `0x${string}`, referrerAmount) });
         }
         if (calls.length === 0) {
           setMsg({ text: "Nothing to transfer", ok: false });
@@ -403,7 +459,7 @@ export default function DashboardWithdraw() {
           }),
         }).catch(() => {});
       }
-      setTimeout(loadData, 3000);
+      window.setTimeout(() => { void loadData(); }, 3000);
     } catch (err: unknown) {
       const e = err as { shortMessage?: string; message?: string };
       setMsg({ text: e.shortMessage || e.message || "Withdrawal failed", ok: false });
@@ -411,19 +467,36 @@ export default function DashboardWithdraw() {
     setSubmitting(false);
   };
 
-  const setMaxAmount = () => setWithdrawAmount(withdrawalSource === "tipBalance" ? formatUsd(tipBalance) : formatUsd(tipsEarnedBalance));
+  const setMaxAmount = () => {
+    setWithdrawAmount(withdrawalSource === "tipBalance" ? formatUsd(tipBalance) : formatUsd(tipsEarnedBalance));
+    setMsg(null);
+  };
+
+  const accountHydrating = authenticated && !address;
+  const backTo = pathname.startsWith("/creator") ? "/creator/dashboard" : "/dashboard";
+  const growTipsPath = pathname.startsWith("/creator") ? "/creator/grow/earn" : "/dashboard/grow-tips";
 
   if (!ready) {
     return (
-      <div className="page-section" style={{ paddingTop: "var(--space-8)", textAlign: "center" }}>
-        <p style={{ color: "var(--text-muted)" }}>Loading…</p>
+      <div className="page-section" style={{ paddingTop: "var(--space-4)", maxWidth: 1000, margin: "0 auto" }}>
+        <Link to={backTo} style={{ fontSize: "var(--text-small)", color: "var(--text-muted)", marginBottom: "var(--space-4)", display: "inline-block" }}>
+          Back to dashboard
+        </Link>
+        <h1 className="withdraw-title" style={{ fontSize: "clamp(1.75rem, 4vw, 2.5rem)", fontWeight: 900, marginBottom: "var(--space-2)", letterSpacing: "-0.02em", color: "var(--text-primary)" }}>
+          Withdraw Funds
+        </h1>
+        <p className="withdraw-subtitle" style={{ color: "var(--text-secondary)", marginBottom: "var(--space-8)", fontSize: "var(--text-body)", lineHeight: 1.5, maxWidth: "42rem" }}>
+          Transfer your accumulated earnings securely to your self-custodial wallet. Funds are routed through the Teep smart protocol.
+        </p>
+        <span className="dashboard-skeleton-card dashboard-skeleton-card--wide" />
       </div>
     );
   }
 
   return (
-    <div className="page-section" style={{ paddingTop: "var(--space-4)", maxWidth: 1000, margin: "0 auto" }}>
-      <Link to="/dashboard" style={{ fontSize: "var(--text-small)", color: "var(--text-muted)", marginBottom: "var(--space-4)", display: "inline-block" }}>
+    <DashboardShell address={address} title="Withdraw">
+      <main className="dashboard-body-inner" style={{ maxWidth: 1000 }}>
+      <Link to={backTo} style={{ fontSize: "var(--text-small)", color: "var(--text-muted)", marginBottom: "var(--space-4)", display: "inline-block" }}>
         ← Back to dashboard
       </Link>
 
@@ -443,11 +516,14 @@ export default function DashboardWithdraw() {
         </div>
       )}
 
-      {authenticated && loading && (
-        <p style={{ color: "var(--text-muted)" }}>Loading…</p>
+      {(accountHydrating || (authenticated && loading)) && (
+        <div className="withdraw-grid">
+          <span className="dashboard-skeleton-card dashboard-skeleton-card--wide" />
+          <span className="dashboard-skeleton-card dashboard-skeleton-card--large" />
+        </div>
       )}
 
-      {authenticated && !loading && (
+      {authenticated && !accountHydrating && !loading && (
         <div className="withdraw-grid">
           {/* Left column — match code.html lg:col-span-7 */}
           <div className="withdraw-left" style={{ minWidth: 0 }}>
@@ -462,8 +538,8 @@ export default function DashboardWithdraw() {
                 className="withdraw-source-card"
                 role="button"
                 tabIndex={0}
-                onClick={() => setWithdrawalSource("tipBalance")}
-                onKeyDown={(e) => e.key === "Enter" && setWithdrawalSource("tipBalance")}
+                onClick={() => selectWithdrawalSource("tipBalance")}
+                onKeyDown={(e) => e.key === "Enter" && selectWithdrawalSource("tipBalance")}
                 style={{
                   position: "relative",
                   display: "flex",
@@ -505,8 +581,8 @@ export default function DashboardWithdraw() {
                 className="withdraw-source-card"
                 role="button"
                 tabIndex={0}
-                onClick={() => canUseTipsEarned && setWithdrawalSource("tipsEarned")}
-                onKeyDown={(e) => canUseTipsEarned && e.key === "Enter" && setWithdrawalSource("tipsEarned")}
+                onClick={() => canUseTipsEarned && selectWithdrawalSource("tipsEarned")}
+                onKeyDown={(e) => canUseTipsEarned && e.key === "Enter" && selectWithdrawalSource("tipsEarned")}
                 style={{
                   position: "relative",
                   display: "flex",
@@ -570,27 +646,22 @@ export default function DashboardWithdraw() {
               <div style={{ marginBottom: "var(--space-6)" }}>
                 <label style={{ display: "block", fontSize: "var(--text-small)", fontWeight: 700, color: "var(--text-secondary)", marginBottom: 4 }}>Destination Address</label>
                 <span style={{ display: "block", fontSize: 10, color: primary, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>Wallet Transfer Active</span>
-                <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-                  <input
-                    type="text"
-                    placeholder="0x..."
-                    value={withdrawTo}
-                    onChange={(e) => setWithdrawTo(e.target.value)}
-                    style={{
-                      width: "100%",
-                      padding: "12px 100px 12px 12px",
-                      background: "var(--bg-page)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "var(--radius-sm)",
-                      color: "var(--text-primary)",
-                      fontSize: "var(--text-body)",
-                      fontFamily: "var(--font-mono)",
-                    }}
-                  />
-                  <button type="button" style={{ position: "absolute", right: 8, padding: "6px 12px", background: `${primary}20`, color: primary, border: "none", borderRadius: "var(--radius-sm)", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-                    Change Wallet
-                  </button>
-                </div>
+                <input
+                  type="text"
+                  placeholder="0x..."
+                  value={withdrawTo}
+                  onChange={(e) => setWithdrawTo(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "12px",
+                    background: "var(--bg-page)",
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--radius-sm)",
+                    color: "var(--text-primary)",
+                    fontSize: "var(--text-body)",
+                    fontFamily: "var(--font-mono)",
+                  }}
+                />
                 <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8, display: "flex", alignItems: "center", gap: 4 }}>
                   <span className="material-symbols-outlined" style={{ fontSize: 14 }}>info</span>
                   Make sure this address is correct. ERC-20 Network only.
@@ -641,10 +712,38 @@ export default function DashboardWithdraw() {
                 </div>
               </div>
 
+              <div style={{ marginTop: "var(--space-4)", padding: "var(--space-4)", borderRadius: "var(--radius-md)", background: "rgba(255,255,255,0.035)", border: "1px solid var(--border)", display: "grid", gap: "var(--space-3)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: "var(--space-3)", fontSize: "var(--text-small)" }}>
+                  <span style={{ color: "var(--text-muted)" }}>Withdrawal source</span>
+                  <strong style={{ color: "var(--text-primary)" }}>{withdrawalSource === "tipsEarned" ? "Tips Earned claim wallet" : "Tip Balance wallet"}</strong>
+                </div>
+                {withdrawalSource === "tipsEarned" && (
+                  <>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: "var(--space-3)", fontSize: "var(--text-small)" }}>
+                      <span style={{ color: "var(--text-muted)" }}>Funds come from</span>
+                      <strong style={{ color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>{shortAddress(selectedClaimWalletForAmount)}</strong>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: "var(--space-3)", fontSize: "var(--text-small)" }}>
+                      <span style={{ color: "var(--text-muted)" }}>Source balance</span>
+                      <strong style={{ color: "var(--text-primary)" }}>${formatUsd(selectedClaimWalletBalance)}</strong>
+                    </div>
+                  </>
+                )}
+                <div style={{ display: "flex", justifyContent: "space-between", gap: "var(--space-3)", fontSize: "var(--text-small)" }}>
+                  <span style={{ color: "var(--text-muted)" }}>Signing wallet</span>
+                  <strong style={{ color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>{shortAddress(address)}</strong>
+                </div>
+                {withdrawalSource === "tipsEarned" && (
+                  <p style={{ margin: 0, color: "var(--text-secondary)", fontSize: "var(--text-caption)", lineHeight: 1.45 }}>
+                    Privy may show your signing wallet in the approval dialog. The transfer itself is executed by the claim wallet above, so your Tip Balance is not the withdrawal source.
+                  </p>
+                )}
+              </div>
+
               <button
                 type="button"
                 onClick={handleWithdraw}
-                disabled={submitting || !withdrawTo.trim() || !withdrawAmount.trim() || (withdrawalSource === "tipsEarned" && !canUseTipsEarned)}
+                disabled={submitting || !withdrawTo.trim() || !withdrawAmount.trim() || parsedWithdrawAmount === null || amountExceedsActiveBalance || (withdrawalSource === "tipsEarned" && !canUseTipsEarned)}
                 style={{
                   width: "100%",
                   marginTop: "var(--space-6)",
@@ -655,8 +754,8 @@ export default function DashboardWithdraw() {
                   borderRadius: "var(--radius-md)",
                   fontSize: "var(--text-heading)",
                   fontWeight: 700,
-                  cursor: submitting || !withdrawTo.trim() || !withdrawAmount.trim() ? "not-allowed" : "pointer",
-                  opacity: submitting || !withdrawTo.trim() || !withdrawAmount.trim() ? 0.6 : 1,
+                  cursor: submitting || !withdrawTo.trim() || !withdrawAmount.trim() || parsedWithdrawAmount === null || amountExceedsActiveBalance ? "not-allowed" : "pointer",
+                  opacity: submitting || !withdrawTo.trim() || !withdrawAmount.trim() || parsedWithdrawAmount === null || amountExceedsActiveBalance ? 0.6 : 1,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -667,8 +766,14 @@ export default function DashboardWithdraw() {
                 {submitting ? "Processing…" : "Confirm Withdrawal"}
               </button>
 
+              {amountExceedsActiveBalance && (
+                <p style={{ marginTop: "var(--space-3)", color: danger, fontSize: "var(--text-small)" }}>
+                  Amount exceeds the selected withdrawal source.
+                </p>
+              )}
+
               {msg && (
-                <p style={{ marginTop: "var(--space-4)", color: msg.ok ? success : "#f4212e", fontSize: "var(--text-small)" }}>
+                <p style={{ marginTop: "var(--space-4)", color: msg.ok ? success : danger, fontSize: "var(--text-small)" }}>
                   {msg.text}
                 </p>
               )}
@@ -687,17 +792,42 @@ export default function DashboardWithdraw() {
           <div className="withdraw-sidebar" style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "var(--space-6)" }}>
             <div style={{ borderRadius: "var(--radius-md)", background: "rgba(99,36,235,0.05)", border: "1px solid rgba(99,36,235,0.2)", padding: "var(--space-6)", display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
               <div style={{ width: 40, height: 40, borderRadius: "50%", background: "rgba(99,36,235,0.2)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <span className="material-symbols-outlined" style={{ color: primary }}>security</span>
+                <span className="material-symbols-outlined" style={{ color: primary }}>fact_check</span>
               </div>
-              <h4 style={{ fontSize: "var(--text-heading)", fontWeight: 700, margin: 0, color: "var(--text-primary)" }}>Non-Custodial Security</h4>
+              <h4 style={{ fontSize: "var(--text-heading)", fontWeight: 700, margin: 0, color: "var(--text-primary)" }}>Before You Confirm</h4>
               <p style={{ fontSize: "var(--text-small)", color: "var(--text-secondary)", lineHeight: 1.6, margin: 0 }}>
-                Teep doesn't hold your funds. All assets are stored in your own secure smart wallet, and you maintain full control at all times.
-                <br /><br />
-                <strong style={{ color: primary }}>Non-custodial by design.</strong> You always maintain full ownership and can withdraw via the contract directly if the UI is ever unavailable.
+                Review the destination and selected source before signing. Wallet transfers are final once confirmed on-chain.
               </p>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: "var(--space-2)", fontSize: 12, fontWeight: 700, color: primary, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                <span className="material-symbols-outlined" style={{ fontSize: 16 }}>verified_user</span>
-                Audited by Quantstamp
+              <div style={{ display: "grid", gap: "var(--space-3)" }}>
+                {[
+                  {
+                    icon: "account_balance_wallet",
+                    title: withdrawalSource === "tipsEarned" ? "Funds come from Tips Earned" : "Funds come from Tip Balance",
+                    body: withdrawalSource === "tipsEarned"
+                      ? "Your wallet signs the request, but the transfer is executed by your claim wallet."
+                      : "This transfer sends USDC directly from your connected wallet.",
+                  },
+                  {
+                    icon: "payments",
+                    title: withdrawalSource === "tipsEarned" ? "Fee is deducted before arrival" : "No Teep withdrawal fee",
+                    body: withdrawalSource === "tipsEarned"
+                      ? `Estimated amount to wallet: ${breakdown ? `$${breakdown.netUsd}` : "enter an amount to preview"}.`
+                      : "The amount you enter is the amount sent to the destination wallet.",
+                  },
+                  {
+                    icon: "travel_explore",
+                    title: "Use an ERC-20 compatible address",
+                    body: "Double-check the address. Teep cannot recover funds sent to the wrong wallet.",
+                  },
+                ].map((item) => (
+                  <div key={item.title} style={{ display: "grid", gridTemplateColumns: "32px minmax(0, 1fr)", gap: "var(--space-3)", alignItems: "start", padding: "var(--space-3)", borderRadius: "var(--radius-md)", background: "rgba(255,255,255,0.035)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                    <span className="material-symbols-outlined" style={{ width: 32, height: 32, borderRadius: "var(--radius-sm)", display: "grid", placeItems: "center", background: "rgba(99,36,235,0.16)", color: primary, fontSize: 18 }}>{item.icon}</span>
+                    <span>
+                      <strong style={{ display: "block", color: "var(--text-primary)", fontSize: "var(--text-small)", marginBottom: 3 }}>{item.title}</strong>
+                      <span style={{ display: "block", color: "var(--text-secondary)", fontSize: 12, lineHeight: 1.45 }}>{item.body}</span>
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
 
@@ -720,7 +850,7 @@ export default function DashboardWithdraw() {
             </div>
 
             {/* Grow Tips — CTA, no crypto terms */}
-            <div style={{ background: "linear-gradient(135deg, rgba(16,185,129,0.1) 0%, transparent 100%)", border: "1px solid rgba(16,185,129,0.25)", padding: "var(--space-6)", borderRadius: "var(--radius-md)" }}>
+            <div style={{ background: "linear-gradient(135deg, var(--metric-positive-muted) 0%, transparent 100%)", border: "1px solid var(--metric-positive-border)", padding: "var(--space-6)", borderRadius: "var(--radius-md)" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
                 <span className="material-symbols-outlined" style={{ color: success }}>trending_up</span>
                 <span style={{ fontSize: "var(--text-small)", fontWeight: 700, color: "var(--text-primary)" }}>Grow Tips</span>
@@ -728,13 +858,15 @@ export default function DashboardWithdraw() {
               <p style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: "var(--space-3)", lineHeight: 1.5 }}>
                 Grow your earnings in a later phase — invite more supporters and earn more from your content.
               </p>
-              <button type="button" disabled style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "8px 16px", background: "var(--bg-elevated)", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", fontSize: "var(--text-small)", fontWeight: 700, cursor: "not-allowed" }}>
-                Coming soon
-              </button>
+              <Link to={growTipsPath} style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "8px 16px", background: "var(--bg-elevated)", color: "var(--text-primary)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", fontSize: "var(--text-small)", fontWeight: 700, textDecoration: "none" }}>
+                Open preview
+                <span className="material-symbols-outlined" style={{ fontSize: 16 }}>arrow_forward</span>
+              </Link>
             </div>
           </div>
         </div>
       )}
-    </div>
+      </main>
+    </DashboardShell>
   );
 }

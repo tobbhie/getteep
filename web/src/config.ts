@@ -32,7 +32,7 @@ export const REFERRAL_REGISTRY_ADDRESS = (import.meta.env.VITE_REFERRAL_REGISTRY
 
 /** Onramp / offramp URLs */
 export const FUNDING_ENV = import.meta.env.VITE_FUNDING_ENV || "arcTestnet";
-export const FAUCET_URL = import.meta.env.VITE_FAUCET_URL || import.meta.env.VITE_ONRAMP_URL || "https://faucet.circle.com";
+export const FAUCET_URL = import.meta.env.VITE_FAUCET_URL || "https://faucet.circle.com";
 export const ONRAMP_URL = import.meta.env.VITE_ONRAMP_URL || "";
 export const OFFRAMP_URL = import.meta.env.VITE_OFFRAMP_URL || "";
 export const ENABLE_FIAT_ONRAMP = import.meta.env.VITE_ENABLE_FIAT_ONRAMP === "true";

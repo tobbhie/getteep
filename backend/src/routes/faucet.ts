@@ -1,8 +1,10 @@
 import { Router, Request, Response } from "express";
-import { createPublicClient, createWalletClient, http, parseAbi, parseUnits } from "viem";
+import { createWalletClient, parseAbi, parseUnits } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { getConfiguredChain, getRpcUrl } from "../config/chain";
 import { isAddress } from "../utils/security";
+import { createBackendHttpTransport, createBackendPublicClient } from "../services/rpcClient";
+import { createFundingProviderSession } from "../services/fundingProviderRecords";
 
 const router = Router();
 
@@ -65,12 +67,9 @@ router.post("/", async (req: Request, res: Response) => {
     const walletClient = createWalletClient({
       account,
       chain: configuredChain,
-      transport: http(RPC_URL),
+      transport: createBackendHttpTransport(RPC_URL),
     });
-    const publicClient = createPublicClient({
-      chain: configuredChain,
-      transport: http(RPC_URL),
-    });
+    const publicClient = createBackendPublicClient({ url: RPC_URL });
 
     const txHash = await walletClient.writeContract({
       address: MOCK_USDC_ADDRESS,
@@ -81,6 +80,20 @@ router.post("/", async (req: Request, res: Response) => {
 
     // Wait for confirmation
     const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+
+    createFundingProviderSession({
+      provider: "Teep Faucet",
+      providerSessionId: txHash,
+      kind: "faucet",
+      userAddress: addrLower,
+      status: "completed",
+      metadata: {
+        amount: "100",
+        asset: "USDC",
+        txHash,
+        blockNumber: Number(receipt.blockNumber),
+      },
+    });
 
     lastFaucetRequest.set(addrLower, Date.now());
 

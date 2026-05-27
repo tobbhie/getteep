@@ -59,7 +59,7 @@ export function buildFundingPolicy(input: FundingPolicyInput = {}): FundingPolic
     realMoneyEnabled: isMainnet,
     testnetCopy: isMainnet
       ? "Real funding providers can be enabled behind launch flags."
-      : "Arc is still testnet, so faucet funds are for beta testing only and are not real money.",
+      : "Faucet funds are for beta testing only and are not real money.",
     providers: {
       faucet: {
         kind: "faucet",
@@ -68,7 +68,7 @@ export function buildFundingPolicy(input: FundingPolicyInput = {}): FundingPolic
         shortLabel: "Faucet",
         description: isMainnet
           ? "Faucet funding is disabled on mainnet."
-          : "Copy your wallet address, then open the Circle Arc testnet faucet.",
+          : "Copy your account address, then open the Circle testnet faucet.",
         enabled: !isMainnet,
         url: !isMainnet ? faucetUrl : undefined,
         disabledReason: isMainnet ? "Faucets are only for testnet." : undefined,
@@ -76,9 +76,9 @@ export function buildFundingPolicy(input: FundingPolicyInput = {}): FundingPolic
       cryptoReceive: {
         kind: "crypto_receive",
         id: "crypto_receive",
-        label: "Receive via Crypto",
+        label: "Receive from Wallet",
         shortLabel: "Receive",
-        description: "Copy your wallet address and receive supported USDC directly.",
+        description: "Copy your account address and receive supported funds directly.",
         enabled: true,
       },
       fiatOnramp: {
@@ -116,5 +116,5 @@ export function buildFundingPolicy(input: FundingPolicyInput = {}): FundingPolic
 export const fundingProviderDecision = {
   primaryOnrampProvider: "Dynamic onramp when Arc mainnet is live, because it best matches Teep's wallet-abstraction goal.",
   primaryOfframpProvider: "Dynamic offramp when Arc mainnet is live, with provider-side compliance/KYC handled outside the extension popup.",
-  currentBetaFundingPath: "Arc testnet uses Circle faucet plus direct crypto receive only.",
+  currentBetaFundingPath: "Testnet uses Circle faucet plus direct wallet receive only.",
 } as const;

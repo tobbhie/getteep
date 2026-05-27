@@ -39,6 +39,6 @@ npm-debug.log*
 gasstation/output/
 
 # Research/scratch docs are intentionally private.
-# Production/operator docs live in project-docs/ and should be versioned.
 docs/
+project-docs/
 ui/

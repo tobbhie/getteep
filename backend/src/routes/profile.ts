@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { getDb } from "../db/database";
 import { getUnifiedTipperStats } from "../services/tipperStats";
+import { getUserSettings, publicIdentity } from "../services/userSettings";
 
 const router = Router();
 
@@ -78,10 +79,25 @@ router.get("/username/:username", (req: Request, res: Response) => {
  */
 router.get("/tipper/:address", (req: Request, res: Response) => {
   const address = (req.params.address as string).toLowerCase();
+  const settings = getUserSettings(address);
+  const identity = publicIdentity(address);
+  if (settings.privacy.privateActivity) {
+    res.json({
+      address: settings.privacy.hideAddress ? null : address,
+      identity: identity.label,
+      privateActivity: true,
+      totalSent: "0",
+      tipCount: 0,
+      creatorsSupported: [],
+    });
+    return;
+  }
   const stats = getUnifiedTipperStats(address);
 
   res.json({
-    address,
+    address: settings.privacy.hideAddress ? null : address,
+    identity: identity.label,
+    privateActivity: false,
     totalSent: stats.totalSent,
     tipCount: stats.tipCount,
     creatorsSupported: stats.creatorsSupported,

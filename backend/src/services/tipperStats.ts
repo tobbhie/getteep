@@ -7,24 +7,19 @@ type IndexedTipRow = {
   tx_hash: string | null;
   timestamp: number;
   author_handle: string | null;
-  username: string | null;
-};
-
-type ActivityTipRow = {
-  amount: string;
-  tx_hash: string | null;
-  timestamp: number;
-  author_handle: string | null;
-  tweet_id: string | null;
-  to_address: string | null;
+  profile_image_url: string | null;
 };
 
 export type UnifiedTipperCreator = {
   authorId: string;
   username: string | null;
+  profileImageUrl: string | null;
   totalRaw: string;
   total: string;
   tipCount: number;
+  isVerified: boolean;
+  claimWalletDeployed: boolean;
+  claimStatus: "unclaimed" | "verified" | "claim_wallet_active";
 };
 
 export type UnifiedTipperStats = {
@@ -62,46 +57,32 @@ export function getUnifiedTipperStats(addressParam: string): UnifiedTipperStats 
   const indexedTips = (currentContract
     ? db.prepare(
         `SELECT t.content_id, t.author_id, t.amount, t.tx_hash, t.timestamp,
-                m.author_handle, vc.username
+                m.author_handle
          FROM tips t
          LEFT JOIN tip_metadata m ON t.content_id = m.content_id
-         LEFT JOIN verified_claims vc ON vc.author_id = t.author_id
          WHERE t.from_address = ? AND LOWER(t.tip_contract_address) = ?
          ORDER BY t.timestamp DESC`
       ).all(address, currentContract)
     : db.prepare(
         `SELECT t.content_id, t.author_id, t.amount, t.tx_hash, t.timestamp,
-                m.author_handle, vc.username
+                m.author_handle
          FROM tips t
          LEFT JOIN tip_metadata m ON t.content_id = m.content_id
-         LEFT JOIN verified_claims vc ON vc.author_id = t.author_id
          WHERE t.from_address = ?
          ORDER BY t.timestamp DESC`
       ).all(address)) as IndexedTipRow[];
 
-  const seenTxHashes = new Set(
-    indexedTips
-      .map((tip) => tip.tx_hash?.toLowerCase())
-      .filter((hash): hash is string => Boolean(hash))
-  );
-
-  const activityTips = db.prepare(
-    `SELECT amount, tx_hash, timestamp, author_handle, tweet_id, to_address
-     FROM user_activity
-     WHERE from_address = ? AND type = 'tip_sent'
-     ORDER BY timestamp DESC`
-  ).all(address) as ActivityTipRow[];
-
   let totalSent = 0n;
   let tipCount = 0;
-  const creators = new Map<string, { authorId: string; username: string | null; totalRaw: bigint; tipCount: number }>();
+  const creators = new Map<string, { authorId: string; username: string | null; profileImageUrl: string | null; totalRaw: bigint; tipCount: number }>();
 
-  function addCreator(params: { authorId?: string | null; username?: string | null; handle?: string | null; fallback?: string | null; amount: bigint }) {
+  function addCreator(params: { authorId?: string | null; username?: string | null; profileImageUrl?: string | null; handle?: string | null; fallback?: string | null; amount: bigint }) {
     const normalizedHandle = params.handle?.replace(/^@/, "").toLowerCase() || null;
     const key = creatorKey(params.authorId, params.username || normalizedHandle, params.fallback);
     const existing = creators.get(key) || {
       authorId: params.authorId || "",
       username: params.username || normalizedHandle,
+      profileImageUrl: params.profileImageUrl || null,
       totalRaw: 0n,
       tipCount: 0,
     };
@@ -109,6 +90,7 @@ export function getUnifiedTipperStats(addressParam: string): UnifiedTipperStats 
     existing.tipCount += 1;
     if (!existing.authorId && params.authorId) existing.authorId = params.authorId;
     if (!existing.username && (params.username || normalizedHandle)) existing.username = params.username || normalizedHandle;
+    if (!existing.profileImageUrl && params.profileImageUrl) existing.profileImageUrl = params.profileImageUrl;
     creators.set(key, existing);
   }
 
@@ -118,30 +100,10 @@ export function getUnifiedTipperStats(addressParam: string): UnifiedTipperStats 
     tipCount += 1;
     addCreator({
       authorId: tip.author_id,
-      username: tip.username,
+      username: null,
+      profileImageUrl: null,
       handle: tip.author_handle,
       fallback: tip.content_id,
-      amount,
-    });
-  }
-
-  const claimByHandle = db.prepare(
-    "SELECT author_id, username FROM verified_claims WHERE LOWER(username) = ? ORDER BY verified_at DESC LIMIT 1"
-  );
-  for (const activity of activityTips) {
-    const hash = activity.tx_hash?.toLowerCase();
-    if (hash && seenTxHashes.has(hash)) continue;
-    const amount = toRawBigInt(activity.amount);
-    totalSent += amount;
-    tipCount += 1;
-
-    const handle = activity.author_handle?.replace(/^@/, "").toLowerCase() || null;
-    const claim = handle ? (claimByHandle.get(handle) as { author_id: string; username: string } | undefined) : undefined;
-    addCreator({
-      authorId: claim?.author_id || null,
-      username: claim?.username || handle,
-      handle,
-      fallback: activity.to_address || activity.tx_hash,
       amount,
     });
   }
@@ -153,12 +115,35 @@ export function getUnifiedTipperStats(addressParam: string): UnifiedTipperStats 
     creatorsSupported: Array.from(creators.values())
       .sort((a, b) => Number(b.totalRaw - a.totalRaw))
       .slice(0, 20)
-      .map((creator) => ({
-        authorId: creator.authorId,
-        username: creator.username,
-        totalRaw: creator.totalRaw.toString(),
-        total: rawToUsdString(creator.totalRaw),
-        tipCount: creator.tipCount,
-      })),
+      .map((creator) => {
+        const claim = creator.authorId
+          ? db.prepare(
+              `SELECT author_id, username, profile_image_url
+               FROM verified_claims
+               WHERE author_id = ? OR (? IS NOT NULL AND LOWER(username) = LOWER(?))
+               ORDER BY verified_at DESC
+               LIMIT 1`
+            ).get(creator.authorId, creator.username, creator.username) as { author_id?: string; username: string; profile_image_url: string | null } | undefined
+          : creator.username
+            ? db.prepare("SELECT author_id, username, profile_image_url FROM verified_claims WHERE LOWER(username) = ? ORDER BY verified_at DESC LIMIT 1").get(creator.username.toLowerCase()) as { author_id: string; username: string; profile_image_url: string | null } | undefined
+            : undefined;
+        const authorId = creator.authorId || ("author_id" in (claim || {}) ? (claim as { author_id?: string }).author_id || "" : "");
+        const wallet = authorId
+          ? db.prepare("SELECT wallet_address FROM claim_wallets WHERE author_id = ? LIMIT 1").get(authorId) as { wallet_address: string } | undefined
+          : undefined;
+        const isVerified = Boolean(claim);
+        const claimWalletDeployed = Boolean(wallet);
+        return {
+          authorId,
+          username: claim?.username || creator.username,
+          profileImageUrl: claim?.profile_image_url || creator.profileImageUrl,
+          totalRaw: creator.totalRaw.toString(),
+          total: rawToUsdString(creator.totalRaw),
+          tipCount: creator.tipCount,
+          isVerified,
+          claimWalletDeployed,
+          claimStatus: claimWalletDeployed ? "claim_wallet_active" : isVerified ? "verified" : "unclaimed",
+        };
+      }),
   };
 }

@@ -3,7 +3,9 @@ import { useParams, Link } from "react-router-dom";
 import { API_BASE, RECEIPT_BASE_URL } from "../config";
 
 interface TipperProfileData {
-  address: string;
+  address: string | null;
+  identity?: string;
+  privateActivity?: boolean;
   totalSent: string;
   tipCount: number;
   creatorsSupported: Array<{ authorId: string; username: string | null; total: string }>;
@@ -34,6 +36,10 @@ function truncateAddress(address: string): string {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
+function profileLabel(profile: TipperProfileData): string {
+  return profile.identity || (profile.address ? truncateAddress(profile.address) : "Private supporter");
+}
+
 export default function TipperProfile() {
   const { address } = useParams<{ address: string }>();
   const [profile, setProfile] = useState<TipperProfileData | null>(null);
@@ -49,11 +55,11 @@ export default function TipperProfile() {
 
   useEffect(() => {
     if (!profile) return;
-    const title = `${truncateAddress(profile.address)} on Teep`;
+    const title = `${profileLabel(profile)} on Teep`;
     const description = profile.tipCount > 0
       ? `This Teep supporter has sent $${formatUsdRaw(profile.totalSent)} across ${profile.tipCount} tips.`
       : "A Teep supporter profile.";
-    const url = `${RECEIPT_BASE_URL}/profile/tipper/${profile.address}`;
+    const url = `${RECEIPT_BASE_URL}/profile/tipper/${address || profile.address || ""}`;
     const prevTitle = document.title;
     document.title = title;
     setMeta("og:title", title);
@@ -78,7 +84,7 @@ export default function TipperProfile() {
 
   const totalUsd = formatUsdRaw(profile.totalSent);
   const supporterBadge = profile.tipCount >= 25 ? "Super supporter" : profile.tipCount >= 5 ? "Early supporter" : "New supporter";
-  const profileUrl = `${RECEIPT_BASE_URL}/profile/tipper/${profile.address}`;
+  const profileUrl = `${RECEIPT_BASE_URL}/profile/tipper/${address || profile.address || ""}`;
 
   const shareProfile = () => {
     navigator.clipboard?.writeText(profileUrl);
@@ -93,7 +99,7 @@ export default function TipperProfile() {
         <button type="button" onClick={shareProfile} className="btn-secondary">{shareCopied ? "Copied" : "Share profile"}</button>
       </div>
       <p style={{ fontFamily: "var(--font-mono)", fontSize: "var(--text-small)", color: "var(--text-muted)", marginBottom: "var(--space-5)" }}>
-        {profile.address}
+        {profileLabel(profile)}
       </p>
 
       <div style={{ display: "flex", gap: "var(--space-4)", marginBottom: "var(--space-6)", flexWrap: "wrap" }}>
@@ -111,12 +117,14 @@ export default function TipperProfile() {
         </div>
       </div>
 
-      <section className="page-section">
-        <h2 className="section-title">Privacy controls</h2>
-        <div className="empty-state">
-          Public privacy controls are deferred for beta. Until then, this page only shows public on-chain tipping activity and shortened wallet identity.
-        </div>
-      </section>
+      {profile.privateActivity && (
+        <section className="page-section">
+          <h2 className="section-title">Private activity</h2>
+          <div className="empty-state">
+            This supporter keeps Teep activity private unless they share a specific receipt.
+          </div>
+        </section>
+      )}
 
       <section className="page-section">
         <h2 className="section-title">Milestone participation</h2>
@@ -125,11 +133,11 @@ export default function TipperProfile() {
         </div>
       </section>
 
-      {profile.creatorsSupported.length === 0 ? (
+      {!profile.privateActivity && profile.creatorsSupported.length === 0 ? (
         <div className="empty-state">
           No creators supported yet.
         </div>
-      ) : (
+      ) : !profile.privateActivity ? (
         <section className="page-section">
           <h2 className="section-title">Creators supported</h2>
           <ul className="list-plain">
@@ -145,7 +153,7 @@ export default function TipperProfile() {
             ))}
           </ul>
         </section>
-      )}
+      ) : null}
     </div>
   );
 }

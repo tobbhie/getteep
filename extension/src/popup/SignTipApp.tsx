@@ -13,6 +13,11 @@ type PendingTip = {
   tweetId?: string;
   amount: number | string;
   rawAmount?: string;
+  receiptPreferences?: {
+    shareAmountEnabled?: boolean;
+    shareLinksEnabled?: boolean;
+    postAwareCopyEnabled?: boolean;
+  };
   needsApproval?: boolean;
   approveData?: { to: string; data: string } | null;
   tipData: { to: string; data: string };
@@ -56,14 +61,16 @@ function getTipErrorMessage(err: unknown): string {
   return e?.shortMessage ?? e?.message ?? "Transaction failed";
 }
 
-function receiptTweet(params: { amount: string; authorHandle: string; tweetId?: string; txHash?: string }) {
+function receiptTweet(params: { amount: string; authorHandle: string; tweetId?: string; txHash?: string; receiptPreferences?: { shareAmountEnabled?: boolean; shareLinksEnabled?: boolean; postAwareCopyEnabled?: boolean } }) {
   const handle = params.authorHandle.replace(/^@/, "");
   const postUrl = params.tweetId ? `https://x.com/${handle}/status/${params.tweetId}` : "";
   const receiptUrl = params.txHash ? `${CONFIG.RECEIPT_BASE_URL}/tx/${params.txHash}` : CONFIG.WEB_APP_URL;
+  const amountPart = params.receiptPreferences?.shareAmountEnabled === false ? "" : ` $${params.amount}`;
+  const receiptPart = `\n\nReceipt: ${receiptUrl}`;
   const firstLine = postUrl
-    ? `Hey @${handle}, just tipped you $${params.amount} via Teep for this wonderful piece: ${postUrl}`
-    : `Hey @${handle}, just tipped you $${params.amount} via Teep`;
-  return `${firstLine}\n\nReceipt: ${receiptUrl}\nSupport creators directly.`;
+    ? `Hey @${handle}, just tipped you${amountPart} via Teep for this wonderful piece: ${postUrl}`
+    : `Hey @${handle}, just tipped you${amountPart} via Teep`;
+  return `${firstLine}${receiptPart}\nSupport creators directly.`;
 }
 
 function formatTipAmount(amount: number | string | undefined) {
@@ -270,6 +277,21 @@ export function SignTipApp() {
     throw new Error(msg);
   }, [client, getClientForChain]);
 
+  const createWalletProof = useCallback(async (address: string, purpose: string, smartClient: Awaited<ReturnType<typeof resolveClient>>) => {
+    const challengeRes = await fetch(`${CONFIG.API_BASE_URL}/auth/wallet/challenge`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ address, purpose }),
+    });
+    const challenge = await challengeRes.json();
+    if (!challengeRes.ok || !challenge.message) throw new Error(challenge.error || "Could not verify account activity.");
+    const signature = await smartClient.signMessage({
+      account: smartClient.account,
+      message: challenge.message,
+    } as Parameters<typeof smartClient.signMessage>[0]);
+    return { message: challenge.message, signature };
+  }, [resolveClient]);
+
   const executeTip = useCallback(async () => {
     if (!pendingTip) {
       setStatus("error");
@@ -316,8 +338,12 @@ export function SignTipApp() {
         amount: pendingTip.amount,
         timestamp: Date.now(),
       };
-      setTxHash(hash);
-      setStatus("success");
+      let activityProof: { message: string; signature: string } | null = null;
+      try {
+        activityProof = await createWalletProof(smartClient.account.address.toLowerCase(), "activity-write", smartClient);
+      } catch (proofError) {
+        debugLog("SignTip", "activity proof unavailable; indexed chain history will still reconcile", compactError(proofError));
+      }
       await chrome.storage.local.set({
         [resolvedResultKey]: resultPayload,
         tipResult: resultPayload,
@@ -337,6 +363,8 @@ export function SignTipApp() {
       if (pendingTip.requestId) keysToRemove.push("pendingTip");
       await chrome.storage.local.remove(keysToRemove);
       chrome.runtime.sendMessage({ type: "TIP_TX_COMPLETE", payload: { success: true, txHash: hash, requestId: resolvedRequestId, requestKey: pendingTip.requestKey } }).catch(() => {});
+      setTxHash(hash);
+      setStatus("success");
 
       await Promise.allSettled([
         fetch(`${CONFIG.API_BASE_URL}/tips/metadata`, {
@@ -359,6 +387,7 @@ export function SignTipApp() {
             authorHandle: pendingTip.authorHandle,
             tweetId: pendingTip.tweetId,
             detail: pendingTip.authorHandle ? `Tipped @${pendingTip.authorHandle}` : "Tip sent",
+            walletProof: activityProof,
           }),
         }),
       ]);
@@ -389,7 +418,7 @@ export function SignTipApp() {
       chrome.runtime.sendMessage({ type: "TIP_TX_COMPLETE", payload: { success: false, requestId: resolvedRequestId, requestKey: pendingTip.requestKey } }).catch(() => {});
       debugLog("SignTip", "tx failed", compact);
     }
-  }, [authenticated, embeddedWallet?.address, login, pendingTip, requestId, resolveClient]);
+  }, [authenticated, createWalletProof, embeddedWallet?.address, login, pendingTip, requestId, resolveClient]);
 
   return (
     <div style={S.app}>
@@ -419,6 +448,7 @@ export function SignTipApp() {
                   authorHandle: pendingTip?.authorHandle || "",
                   tweetId: pendingTip?.tweetId,
                   txHash,
+                  receiptPreferences: pendingTip?.receiptPreferences,
                 })
               )}`}
               target="_blank"

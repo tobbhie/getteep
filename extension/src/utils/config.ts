@@ -48,7 +48,7 @@ export const CONFIG = {
 
   // Funding / cash movement gates
   FUNDING_ENV: process.env.FUNDING_ENV || "arcTestnet",
-  FAUCET_URL: process.env.FAUCET_URL || process.env.ONRAMP_URL || "https://faucet.circle.com",
+  FAUCET_URL: process.env.FAUCET_URL || "https://faucet.circle.com",
   ENABLE_FIAT_ONRAMP: process.env.ENABLE_FIAT_ONRAMP === "true",
   ENABLE_FIAT_OFFRAMP: process.env.ENABLE_FIAT_OFFRAMP === "true",
   ONRAMP_URL: process.env.ONRAMP_URL || "",

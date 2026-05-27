@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import DashboardShell from "../components/DashboardShell";
 
 const strategyRows = [
   { label: "Beta mode", value: "Preview only" },
@@ -16,44 +17,7 @@ const roadmap = [
 
 export default function GrowTips() {
   return (
-    <div className="dashboard-layout">
-      <aside className="dashboard-sidebar">
-        <div style={{ padding: "var(--space-6) var(--space-4) var(--space-4)", display: "flex", flexDirection: "column", gap: 4 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <img src="/logo.svg" alt="Teep" width={32} height={32} />
-            <h1 style={{ fontSize: "1.25rem", fontWeight: 800, margin: 0, letterSpacing: "-0.02em" }}>Teep</h1>
-          </div>
-          <div style={{ fontSize: 10, color: "var(--text-secondary)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", marginTop: "var(--space-2)" }}>Creator Dashboard</div>
-        </div>
-        <div style={{ padding: "0 var(--space-2)", flex: 1, display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
-          <Link to="/dashboard" className="dashboard-sidebar-btn">
-            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>dashboard</span>
-            Overview
-          </Link>
-          <Link to="/dashboard" className="dashboard-sidebar-btn">
-            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>payments</span>
-            Earnings
-          </Link>
-          <Link to="/leaderboard" className="dashboard-sidebar-btn">
-            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>leaderboard</span>
-            Leaderboard
-          </Link>
-          <Link to="/dashboard/grow-tips" className="dashboard-sidebar-btn" style={{ background: "rgba(99, 36, 235, 0.1)", color: "var(--accent)" }}>
-            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>trending_up</span>
-            Grow Tips
-          </Link>
-        </div>
-        <div style={{ padding: "var(--space-4)", borderTop: "1px solid var(--border)" }}>
-          <Link to="/dashboard" className="dashboard-sidebar-btn" style={{ justifyContent: "center", color: "var(--accent)", background: "rgba(99, 36, 235, 0.1)" }}>
-            <span className="material-symbols-outlined" style={{ fontSize: 16 }}>visibility</span>
-            Public Profile
-          </Link>
-        </div>
-      </aside>
-      <div className="dashboard-body">
-        <header className="dashboard-header">
-          <h2 style={{ fontSize: "1.125rem", margin: 0, fontWeight: 700 }}>Grow Tips</h2>
-        </header>
+    <DashboardShell title="Grow Tips">
         <div className="dashboard-body-inner">
           <div className="dashboard-grid-2" style={{ gridTemplateColumns: "1.25fr 0.75fr" }}>
             <section className="dashboard-card" style={{ padding: "var(--space-8)" }}>
@@ -102,7 +66,6 @@ export default function GrowTips() {
             </Link>
           </div>
         </div>
-      </div>
-    </div>
+    </DashboardShell>
   );
 }

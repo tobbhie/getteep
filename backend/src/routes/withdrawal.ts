@@ -6,6 +6,7 @@ import { isAddress } from "../utils/security";
 import { verifyWalletProof } from "../services/walletAuth";
 import { recordSecurityEvent } from "../services/ops";
 import { getConfiguredChain } from "../config/chain";
+import { createReferralEarnedNotification, createWithdrawalConfirmedNotification } from "../services/notifications";
 import {
   FEE_BPS,
   REFERRER_SHARE_BPS,
@@ -335,11 +336,12 @@ router.post("/confirm", async (req: Request, res: Response) => {
 
   const db = getDb();
   const row = db.prepare(
-    "SELECT id, owner_address, destination_address, amount_raw, status, expires_at, code_hash FROM withdrawal_confirmations WHERE id = ?"
+    "SELECT id, owner_address, destination_address, source, amount_raw, status, expires_at, code_hash FROM withdrawal_confirmations WHERE id = ?"
   ).get(requestId) as {
     id: string;
     owner_address: string;
     destination_address: string;
+    source: string;
     amount_raw: string;
     status: string;
     expires_at: number;
@@ -365,7 +367,7 @@ router.post("/confirm", async (req: Request, res: Response) => {
   }
 
   let withdrawalAuthorization: Awaited<ReturnType<typeof signWithdrawalAuthorization>> | undefined;
-  if (row.destination_address !== row.owner_address) {
+  if (row.source === "tipsEarned" && row.destination_address !== row.owner_address) {
     if (!isAddress(claimWalletAddress)) {
       res.status(400).json({ error: "claimWalletAddress is required for non-owner withdrawal destinations." });
       return;
@@ -439,13 +441,52 @@ router.post("/record", async (req: Request, res: Response) => {
 
   const now = Date.now();
   try {
-    db.prepare(`
-      INSERT INTO withdrawal_records (
-        owner_address, destination_address, source, amount_raw, tx_hash, confirmation_id, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(row.owner_address, row.destination_address, row.source, row.amount_raw, txHash, row.id, now);
-    db.prepare("UPDATE withdrawal_confirmations SET status = 'used', tx_hash = ?, used_at = ? WHERE id = ?")
-      .run(txHash, now, row.id);
+    let referrerAddress: string | null = null;
+    let referrerAmount = 0n;
+    const feeAmount = (BigInt(row.amount_raw) * BigInt(FEE_BPS)) / 10000n;
+    const hasActiveReferral = ((db.prepare("SELECT COUNT(*) as c FROM tips WHERE from_address = ?").get(ownerAddress) as { c: number } | undefined)?.c ?? 0) >= REFERRAL_ACTIVATION_MIN_TIPS;
+    if (hasActiveReferral && feeAmount > 0n) {
+      const refRow = db.prepare("SELECT referrer_address FROM user_referrals WHERE user_address = ?").get(ownerAddress) as { referrer_address: string } | undefined;
+      const refAddr = refRow?.referrer_address?.toLowerCase();
+      if (refAddr && refAddr !== ownerAddress) {
+        const refCount = (db.prepare("SELECT COUNT(*) as c FROM user_referrals WHERE referrer_address = ?").get(refAddr) as { c: number } | undefined)?.c ?? 0;
+        if (refCount <= REFERRAL_CAP_PER_REFERRER) {
+          referrerAddress = refAddr;
+          referrerAmount = (feeAmount * BigInt(REFERRER_SHARE_BPS)) / 10000n;
+        }
+      }
+    }
+
+    const tx = db.transaction(() => {
+      db.prepare(`
+        INSERT INTO withdrawal_records (
+          owner_address, destination_address, source, amount_raw, tx_hash, confirmation_id, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(row.owner_address, row.destination_address, row.source, row.amount_raw, txHash, row.id, now);
+      db.prepare("UPDATE withdrawal_confirmations SET status = 'used', tx_hash = ?, used_at = ? WHERE id = ?")
+        .run(txHash, now, row.id);
+      if (referrerAddress && referrerAmount > 0n) {
+        db.prepare(
+          `INSERT INTO user_activity (type, from_address, to_address, amount, tx_hash, detail, author_handle, tweet_id, timestamp)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).run(
+          "referral_fee_received",
+          ownerAddress,
+          referrerAddress,
+          referrerAmount.toString(),
+          txHash,
+          "Referral fee from eligible withdrawal",
+          null,
+          null,
+          Math.floor(now / 1000)
+        );
+      }
+    });
+    tx();
+    createWithdrawalConfirmedNotification({ userAddress: ownerAddress, amountRaw: row.amount_raw, txHash });
+    if (referrerAddress && referrerAmount > 0n) {
+      createReferralEarnedNotification({ userAddress: referrerAddress, amountRaw: referrerAmount.toString(), txHash, referredAddress: ownerAddress });
+    }
     res.json({ recorded: true });
   } catch (err: any) {
     if (String(err.message || "").includes("UNIQUE")) {

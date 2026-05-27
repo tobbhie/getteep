@@ -54,6 +54,12 @@ function assertProductionEnv() {
   if (process.env.ALLOW_CLIENT_ACTIVITY_WRITES === "true") {
     throw new Error("Production backend cannot enable ALLOW_CLIENT_ACTIVITY_WRITES.");
   }
+  if (process.env.ALLOW_INSECURE_RPC_TLS === "true") {
+    throw new Error("Production backend cannot enable ALLOW_INSECURE_RPC_TLS.");
+  }
+  if (process.env.ALLOW_INSECURE_OEMBED_TLS === "true") {
+    throw new Error("Production backend cannot enable ALLOW_INSECURE_OEMBED_TLS.");
+  }
   if (process.env.ALLOW_UNSIGNED_REFERRAL_WRITES === "true" || process.env.ALLOW_UNSIGNED_ATTESTATION === "true") {
     throw new Error("Production backend cannot allow unsigned writes or attestations.");
   }

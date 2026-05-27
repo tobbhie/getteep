@@ -3,15 +3,23 @@ import { Link, useParams } from "react-router-dom";
 import { API_BASE, CHROME_STORE_URL, RECEIPT_BASE_URL, DOCS_URL, CHAIN_NAME, EXPLORER_TX_URL, HAS_CHROME_STORE_LISTING } from "../config";
 
 interface ReceiptData {
-  fromAddress: string;
+  fromAddress: string | null;
+  fromIdentity?: string;
   toAddress: string;
   amount: string;
+  displayAmount?: boolean;
   txHash: string;
   timestamp: number;
   authorId: string;
   contentId: string;
   authorHandle: string | null;
   tweetId: string | null;
+  kind?: string;
+  receiptPreferences?: {
+    shareAmountEnabled?: boolean;
+    shareLinksEnabled?: boolean;
+    postAwareCopyEnabled?: boolean;
+  };
 }
 
 function formatUsdRaw(raw: string): string {
@@ -102,7 +110,7 @@ export default function TxReceipt() {
     if (!data || !txHash) return;
     const creatorLabel = data.authorHandle ? `@${data.authorHandle}` : "Creator";
     const amountUsd = formatUsdRaw(data.amount);
-    const title = `${creatorLabel} received a $${amountUsd} tip — Teep`;
+    const title = data.displayAmount === false ? `${creatorLabel} received a tip on Teep` : `${creatorLabel} received a $${amountUsd} tip on Teep`;
     const description = "Claim your tip in seconds.";
     const url = `${RECEIPT_BASE_URL}/tx/${txHash}`;
     const prevTitle = document.title;
@@ -121,9 +129,28 @@ export default function TxReceipt() {
 
   const shareOnX = () => {
     if (!data) return;
-    const creator = data.authorHandle ? `@${data.authorHandle}` : "the creator";
+    const creator = data.authorHandle
+      ? `@${data.authorHandle}`
+      : data.kind === "deposit"
+        ? "my Teep account"
+        : data.kind === "withdrawal"
+          ? "from Teep"
+          : data.kind === "referral_fee_received"
+            ? "a referral fee"
+            : "the creator";
     const amount = formatUsdRaw(data.amount);
-    const text = `I just tipped ${creator} $${amount} with Teep.\n\nReceipt: ${receiptUrl}\nSupport creators directly.`;
+    const amountPart = data.receiptPreferences?.shareAmountEnabled === false ? "" : ` $${amount}`;
+    const receiptPart = `\n\nReceipt: ${receiptUrl}`;
+    const text =
+      data.kind === "direct_creator_tip"
+        ? `I just sent ${creator} a direct creator tip${amountPart} with Teep.${receiptPart}\nSupport creators directly.`
+        : data.kind === "deposit"
+          ? `I just added${amountPart} to ${creator}.${receiptPart}\nSupport creators directly.`
+          : data.kind === "withdrawal"
+            ? `I just withdrew${amountPart} ${creator}.${receiptPart}\nSupport creators directly.`
+            : data.kind === "referral_fee_received"
+              ? `I just earned${amountPart} from Teep referrals.${receiptPart}\nSupport creators directly.`
+              : `I just tipped ${creator}${amountPart} with Teep.${receiptPart}\nSupport creators directly.`;
     window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
   };
 
@@ -177,6 +204,24 @@ export default function TxReceipt() {
 
   const amountUsd = formatUsdRaw(data.amount);
   const creatorHandle = data.authorHandle ? `@${data.authorHandle}` : truncateAddress(data.toAddress);
+  const isDirectTip = data.kind === "direct_creator_tip";
+  const isPostTip = !data.kind || data.kind === "post_tip";
+  const receiptKind =
+    data.kind === "deposit" ? "Deposit" :
+    data.kind === "withdrawal" ? "Withdrawal" :
+    data.kind === "referral_fee_received" ? "Referral Earning" :
+    isDirectTip ? "Direct Creator Tip" :
+    "Post Tip";
+  const receiptVerb =
+    data.kind === "deposit" ? "was deposited to" :
+    data.kind === "withdrawal" ? "withdrew from" :
+    data.kind === "referral_fee_received" ? "earned a referral fee on" :
+    "tipped";
+  const receiptTitle =
+    data.kind === "deposit" ? "Deposit Confirmed" :
+    data.kind === "withdrawal" ? "Withdrawal Confirmed" :
+    data.kind === "referral_fee_received" ? "Referral Earning Confirmed" :
+    `${receiptKind} Sent Successfully`;
   const tweetDisplayName = oembed?.author_name ?? creatorHandle;
   const tweetSnippet = oembed?.excerpt ?? "Post linked to this tip";
   const explorerUrl = `${EXPLORER_TX_URL}/${data.txHash}`;
@@ -204,14 +249,14 @@ export default function TxReceipt() {
           <div className="tx-receipt-success-icon">
             <span className="material-symbols-outlined" style={{ fontSize: 40 }}>check_circle</span>
           </div>
-          <h1 className="tx-receipt-title">Tip Sent Successfully</h1>
+          <h1 className="tx-receipt-title">{receiptTitle}</h1>
           <p className="tx-receipt-line">
-            <span className="tx-receipt-handle">{truncateAddress(data.fromAddress)}</span> tipped <span className="tx-receipt-handle">{creatorHandle}</span>
+            <span className="tx-receipt-handle">{data.fromIdentity || (data.fromAddress ? truncateAddress(data.fromAddress) : "A supporter")}</span> {receiptVerb} <span className="tx-receipt-handle">{isPostTip || isDirectTip ? creatorHandle : "Teep"}</span>
           </p>
-          <div className="tx-receipt-amount">${amountUsd} USD</div>
+          {data.displayAmount !== false && <div className="tx-receipt-amount">${amountUsd} USD</div>}
         </div>
 
-        {tweetUrl && (
+        {tweetUrl && !isDirectTip && (
           <div className="tx-receipt-tweet-card">
             <div className="tx-receipt-tweet-header">
               <img src={`https://unavatar.io/twitter/${data.authorHandle}`} alt="" className="tx-receipt-tweet-avatar" onError={(e) => { e.currentTarget.src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${data.authorHandle}`; }} />
@@ -226,12 +271,12 @@ export default function TxReceipt() {
           </div>
         )}
 
-        <div className="tx-receipt-status-pill">
+        {(isPostTip || isDirectTip) && <div className="tx-receipt-status-pill">
           <span className="material-symbols-outlined" style={{ fontSize: 18 }}>schedule</span>
           Waiting for creator to claim
-        </div>
+        </div>}
 
-        <div className="tx-receipt-claim-card">
+        {(isPostTip || isDirectTip) && <div className="tx-receipt-claim-card">
           <h3 className="tx-receipt-claim-title">
             <span className="material-symbols-outlined" style={{ color: "var(--accent)", fontSize: 28 }}>payments</span>
             You received a tip
@@ -242,7 +287,7 @@ export default function TxReceipt() {
           <a href={CHROME_STORE_URL} target="_blank" rel="noopener noreferrer" className="tx-receipt-claim-cta">
             {claimLabel}
           </a>
-        </div>
+        </div>}
 
         <div className="tx-receipt-actions">
           <button type="button" onClick={shareOnX} className="tx-receipt-btn-share">
@@ -262,8 +307,9 @@ export default function TxReceipt() {
             <span className="material-symbols-outlined" style={{ transform: detailsOpen ? "rotate(180deg)" : undefined, transition: "transform 0.2s" }}>expand_more</span>
           </summary>
           <div className="tx-receipt-details-inner">
-            <div className="tx-receipt-detail-row"><span>Amount</span><span>${amountUsd} USD</span></div>
-            <div className="tx-receipt-detail-row"><span>Sender</span><span className="tx-receipt-mono">{truncateAddress(data.fromAddress)}</span></div>
+            {data.displayAmount !== false && <div className="tx-receipt-detail-row"><span>Amount</span><span>${amountUsd} USD</span></div>}
+            <div className="tx-receipt-detail-row"><span>Receipt Type</span><span>{receiptKind}</span></div>
+            <div className="tx-receipt-detail-row"><span>Sender</span><span className="tx-receipt-mono">{data.fromIdentity || (data.fromAddress ? truncateAddress(data.fromAddress) : "Private")}</span></div>
             <div className="tx-receipt-detail-row"><span>Receiver</span><span className="tx-receipt-mono">{truncateAddress(data.toAddress)}</span></div>
             <div className="tx-receipt-detail-row"><span>Transaction Hash</span><span className="tx-receipt-mono">{data.txHash.slice(0, 10)}…{data.txHash.slice(-8)}</span></div>
             <div className="tx-receipt-detail-row"><span>Network</span><span>{CHAIN_NAME}</span></div>

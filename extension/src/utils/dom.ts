@@ -20,22 +20,32 @@ export interface PostIdentity {
  */
 export function extractPostIdentity(article: HTMLElement): PostIdentity | null {
   try {
+    const linkToIdentity = (link: HTMLAnchorElement | null): PostIdentity | null => {
+      const href = link?.href || "";
+      const match = href.match(/\/([^/]+)\/(?:status|article)\/(\d+)/);
+      if (!match) return null;
+      const segment = match[1];
+      if (segment.toLowerCase() === "i") return null;
+      return { authorHandle: segment, tweetId: match[2] };
+    };
+
+    // The timestamp permalink is the most reliable identity for the article itself.
+    // Other status links can point to quoted posts, replies, or profile modules inside the same card.
+    const timeLink = article.querySelector('time')?.closest('a[href*="/status/"], a[href*="/article/"]') as HTMLAnchorElement | null;
+    const timeIdentity = linkToIdentity(timeLink);
+    if (timeIdentity) return timeIdentity;
+
     // Find the status link: /username/status/1234567890
     const statusLinks = article.querySelectorAll('a[href*="/status/"]');
     let tweetId: string | null = null;
     let authorHandle: string | null = null;
 
     for (const link of statusLinks) {
-      const href = (link as HTMLAnchorElement).href;
-      // Support /status/ and /article/; reject username-less /i/status/ (author unknown from URL)
-      const match = href.match(/\/([^/]+)\/(?:status|article)\/(\d+)/);
-      if (match) {
-        const segment = match[1];
-        if (segment.toLowerCase() === "i") continue; // x.com/i/status/{id} has no author in path
-        authorHandle = segment;
-        tweetId = match[2];
-        break;
-      }
+      const identity = linkToIdentity(link as HTMLAnchorElement);
+      if (!identity) continue;
+      authorHandle = identity.authorHandle;
+      tweetId = identity.tweetId;
+      break;
     }
 
     if (!tweetId || !authorHandle) return null;

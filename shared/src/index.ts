@@ -16,3 +16,13 @@ export type {
   FundingProvider,
   FundingProviderKind,
 } from "./funding";
+
+export {
+  getTeepActivityTitle,
+  getTeepActivityTypeLabel,
+  isTeepActivityPositive,
+} from "./activity";
+export type {
+  TeepActivityLike,
+  TeepActivityType,
+} from "./activity";
