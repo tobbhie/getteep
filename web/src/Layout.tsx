@@ -71,7 +71,19 @@ export default function Layout({ children }: { children: ReactNode }) {
   }, [location.pathname, location.hash]);
 
   return (
-    <div className="layout">
+    <div className={`layout ${isHome ? "layout--lp" : ""}`}>
+      {!hideGlobalNav && isHome && (
+        <div className="lp-announce">
+          <p className="lp-announce-text">
+            <strong>Teep Beta</strong>
+            <span className="lp-announce-sep" aria-hidden />
+            <span className="lp-announce-desc">Creator tipping is live on Arc testnet</span>
+          </p>
+          <a href={CHROME_STORE_URL} target="_blank" rel="noopener noreferrer" className="lp-announce-link">
+            {HAS_CHROME_STORE_LISTING ? "Get Started" : "Join the Beta"} <span aria-hidden>→</span>
+          </a>
+        </div>
+      )}
       {!hideGlobalNav && (
         <header className="layout-header layout-header--landing">
           <div className="layout-header-inner">
@@ -220,7 +232,61 @@ export default function Layout({ children }: { children: ReactNode }) {
       <main className={`layout-main ${isDashboard ? "layout-main--dashboard" : ""} ${isHome || isReceipt ? "layout-main--full" : ""}`}>
         {children}
       </main>
-      {!hideGlobalNav && (
+      {!hideGlobalNav && isHome && (
+        <footer className="lp-footer">
+          <div className="lp-footer-top">
+            <div className="lp-footer-brand-col">
+              <div className="lp-footer-status">
+                <span className="lp-footer-status-dot" aria-hidden />
+                Live on Arc Testnet
+              </div>
+              <p className="lp-footer-build">Build the future of creator support on Teep</p>
+              <div className="lp-footer-social">
+                <a href={TWITTER_URL} target="_blank" rel="noopener noreferrer">Twitter</a>
+                <a href={DISCORD_URL} target="_blank" rel="noopener noreferrer">Discord</a>
+                <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
+              </div>
+            </div>
+            <div className="lp-footer-cols">
+              <div className="lp-footer-col">
+                <h4>Product</h4>
+                <Link to="/#how-it-works" onClick={() => handleHashLinkClick("#how-it-works")}>How it works</Link>
+                <Link to="/#stats" onClick={() => handleHashLinkClick("#stats")}>Stats</Link>
+                <Link to="/#faq" onClick={() => handleHashLinkClick("#faq")}>FAQ</Link>
+                <Link to="/fees">Fees</Link>
+              </div>
+              <div className="lp-footer-col">
+                <h4>Creators</h4>
+                <Link to="/dashboard">Dashboard</Link>
+                <Link to="/leaderboard">Leaderboard</Link>
+                <Link to="/support">Support</Link>
+              </div>
+              <div className="lp-footer-col">
+                <h4>Resources</h4>
+                <a href={DOCS_URL} target="_blank" rel="noopener noreferrer">Docs</a>
+                <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
+                <a href={CHROME_STORE_URL} target="_blank" rel="noopener noreferrer">
+                  {HAS_CHROME_STORE_LISTING ? "Extension" : "Beta Access"}
+                </a>
+              </div>
+            </div>
+          </div>
+          <div className="lp-footer-blocks" aria-hidden>
+            <span className="lp-footer-block lp-footer-block--tall" />
+            <span className="lp-footer-block" />
+            <span className="lp-footer-block" />
+            <span className="lp-footer-block" />
+          </div>
+          <div className="lp-footer-bottom">
+            <span>© {new Date().getFullYear()} Teep. Your money. You control it. Not affiliated with X Corp.</span>
+            <div className="lp-footer-legal">
+              <Link to="/terms">Terms of Service</Link>
+              <Link to="/privacy">Privacy Policy</Link>
+            </div>
+          </div>
+        </footer>
+      )}
+      {!hideGlobalNav && !isHome && (
         <footer className="layout-footer">
           <div className="layout-footer-brand">
             <Link to="/" className="layout-footer-logo">Teep</Link>

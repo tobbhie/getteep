@@ -61,36 +61,124 @@ function XLogoIcon({ className }: { className?: string }) {
   );
 }
 
-function HeroTweetCard({
-  className,
-  handle,
-  body,
-  amount,
-}: {
-  className: string;
-  handle: string;
-  body: string;
-  amount: string;
-}) {
+/* Small scattered pixel-glyph decorations, echoing the reference hero */
+function LpGlyph({ className, variant }: { className: string; variant: 1 | 2 | 3 }) {
+  if (variant === 1) {
+    return (
+      <svg className={`lp-glyph ${className}`} viewBox="0 0 56 56" width="56" height="56" aria-hidden>
+        <g fill="currentColor">
+          <rect x="4" y="20" width="3" height="3" />
+          <rect x="12" y="12" width="3" height="3" />
+          <rect x="20" y="8" width="3" height="3" />
+          <rect x="28" y="14" width="3" height="3" />
+          <rect x="16" y="24" width="3" height="3" />
+          <rect x="24" y="30" width="3" height="3" />
+          <rect x="36" y="22" width="3" height="3" />
+          <rect x="40" y="36" width="3" height="3" />
+          <rect x="30" y="44" width="3" height="3" />
+          <rect x="10" y="38" width="3" height="3" />
+        </g>
+      </svg>
+    );
+  }
+  if (variant === 2) {
+    return (
+      <svg className={`lp-glyph ${className}`} viewBox="0 0 64 40" width="64" height="40" aria-hidden>
+        <g fill="currentColor">
+          <rect x="2" y="18" width="2" height="6" />
+          <rect x="8" y="12" width="2" height="16" />
+          <rect x="14" y="16" width="2" height="10" />
+          <rect x="20" y="6" width="2" height="28" />
+          <rect x="26" y="14" width="2" height="14" />
+          <rect x="32" y="10" width="2" height="20" />
+          <rect x="38" y="17" width="2" height="8" />
+          <rect x="44" y="13" width="2" height="15" />
+          <rect x="50" y="18" width="2" height="6" />
+          <rect x="56" y="15" width="2" height="11" />
+        </g>
+      </svg>
+    );
+  }
   return (
-    <div className={`landing-hero-tweet ${className}`}>
-      <div className="landing-hero-tweet-header">
-        <div className="landing-hero-tweet-avatar" />
-        <div>
-          <div className="landing-hero-tweet-name">{handle}</div>
-          <div className="landing-hero-tweet-meta">@{handle.toLowerCase().replace(/\s+/g, "")} - now</div>
-        </div>
-      </div>
-      <p>{body}</p>
-      <div className="landing-hero-tweet-media" />
-      <div className="landing-hero-tweet-actions">
-        <span>2.4K likes</span>
-        <span>640 reposts</span>
-        <span className="landing-hero-tweet-tip">${amount} tip</span>
-      </div>
-    </div>
+    <svg className={`lp-glyph ${className}`} viewBox="0 0 48 48" width="48" height="48" aria-hidden>
+      <g fill="none" stroke="currentColor" strokeWidth="1.5">
+        <path d="M10 6v8M6 10h8" />
+        <path d="M36 28v8M32 32h8" />
+        <path d="M22 38v6M19 41h6" />
+      </g>
+    </svg>
   );
 }
+
+/* Thin line-art illustrations for the platform grid, echoing the reference cards */
+function PlatformArt({ kind }: { kind: "instant" | "waiting" | "custody" | "native" }) {
+  if (kind === "instant") {
+    return (
+      <svg className="lp-card-art" viewBox="0 0 220 120" aria-hidden>
+        <g fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="M40 96a70 70 0 0 1 140 0" opacity="0.35" />
+          <path d="M58 96a52 52 0 0 1 104 0" opacity="0.6" />
+          <path d="M76 96a34 34 0 0 1 68 0" />
+          <circle cx="110" cy="96" r="10" />
+          <path d="M110 90v8M106 94h8" strokeWidth="1.2" />
+        </g>
+        <g fill="currentColor">
+          <rect x="30" y="30" width="3" height="3" />
+          <rect x="186" y="42" width="3" height="3" />
+          <rect x="170" y="22" width="3" height="3" />
+        </g>
+      </svg>
+    );
+  }
+  if (kind === "waiting") {
+    return (
+      <svg className="lp-card-art" viewBox="0 0 220 120" aria-hidden>
+        <g fill="none" stroke="currentColor" strokeWidth="1.5">
+          <rect x="70" y="56" width="80" height="44" rx="6" />
+          <path d="M70 70h80" opacity="0.5" />
+          <circle cx="110" cy="34" r="12" />
+          <path d="M106 34h8M110 30v8" strokeWidth="1.2" />
+          <path d="M110 46v10" strokeDasharray="3 4" />
+          <circle cx="134" cy="84" r="7" opacity="0.7" />
+        </g>
+        <g fill="currentColor">
+          <rect x="46" y="44" width="3" height="3" />
+          <rect x="172" y="50" width="3" height="3" />
+        </g>
+      </svg>
+    );
+  }
+  if (kind === "custody") {
+    return (
+      <svg className="lp-card-art" viewBox="0 0 220 120" aria-hidden>
+        <g fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="M110 22 144 34v26c0 20-14 33-34 40-20-7-34-20-34-40V34Z" />
+          <path d="m98 60 9 9 16-18" />
+          <circle cx="62" cy="86" r="5" opacity="0.5" />
+          <circle cx="160" cy="78" r="5" opacity="0.5" />
+        </g>
+        <g fill="currentColor">
+          <rect x="48" y="36" width="3" height="3" />
+          <rect x="168" y="40" width="3" height="3" />
+        </g>
+      </svg>
+    );
+  }
+  return (
+    <svg className="lp-card-art" viewBox="0 0 220 120" aria-hidden>
+      <g fill="none" stroke="currentColor" strokeWidth="1.5">
+        <rect x="48" y="24" width="124" height="72" rx="8" />
+        <circle cx="68" cy="42" r="8" />
+        <path d="M84 38h52M84 48h36" opacity="0.5" />
+        <path d="M60 80h14M88 80h14" opacity="0.5" />
+        <rect x="124" y="72" width="40" height="16" rx="8" />
+        <path d="m136 80 3-4 1.5 4 3-4 1.5 4" strokeWidth="1.2" />
+      </g>
+    </svg>
+  );
+}
+
+const POWERED_BY = ["Arc", "USDC", "Circle", "Privy", "viem", "Chrome", "Hardhat", "X"];
 
 const FAQ_ITEMS: Array<{ q: string; a: ReactNode }> = [
   {
@@ -424,268 +512,293 @@ export default function Home() {
   }, [confirmTipData, smartWalletClient, address]);
 
   return (
-    <div className="landing-v2">
-      <section className="landing-hero-v2">
-        <div className="landing-hero-mosaic" aria-hidden>
-          <div className="landing-hero-mosaic-fade" />
-          <div className="landing-hero-tweet-grid">
-            <HeroTweetCard className="landing-hero-tweet--one" handle="Alex River" body="This essay helped me ship again. Tiny support from readers goes a long way." amount="5" />
-            <HeroTweetCard className="landing-hero-tweet--two" handle="Maya Builds" body="New walkthrough is live. If it saves you time, send a small tip and keep the series going." amount="10" />
-            <HeroTweetCard className="landing-hero-tweet--three" handle="Design Notes" body="Creators should own the upside from their work, not just chase algorithms." amount="3" />
-            <HeroTweetCard className="landing-hero-tweet--four" handle="Indie Desk" body="Tips received today can be claimed, withdrawn, or put to work with simple growth tools." amount="12" />
-            <HeroTweetCard className="landing-hero-tweet--six" handle="Open Studio" body="Reader support keeps independent work alive. Every small tip counts." amount="2" />
+    <div className="lp">
+      {/* Hero — centered statement, two CTAs, scattered glyphs */}
+      <section className="lp-hero">
+        <LpGlyph className="lp-glyph--1" variant={1} />
+        <LpGlyph className="lp-glyph--2" variant={2} />
+        <LpGlyph className="lp-glyph--3" variant={3} />
+        <LpGlyph className="lp-glyph--4" variant={1} />
+        <LpGlyph className="lp-glyph--5" variant={2} />
+        <div className="lp-hero-inner">
+          <h1 className="lp-hero-title">
+            The tipping layer
+            <br />
+            for creators.
+          </h1>
+          <p className="lp-hero-sub">
+            Built on Arc. Teep lets fans support creators right from the post — instant, non-custodial, and in stable dollars.
+          </p>
+          <div className="lp-hero-ctas">
+            <a href={CHROME_STORE_URL} target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn--primary">
+              <Icon name="puzzle" />
+              {HAS_CHROME_STORE_LISTING ? "Get the Extension" : "Join the Beta"}
+            </a>
+            <a href="#tip" className="lp-btn lp-btn--secondary">
+              <Icon name="send" />
+              Send a tip
+            </a>
           </div>
         </div>
-        <div className="landing-hero-inner">
-          <div className="landing-hero-content">
-            <div className="landing-hero-pill">
-              <Icon name="bolt" />
-              Built for creator support.
-            </div>
-            <h1 className="landing-hero-title-v2">
-              Tip creators.
-              <br />
-              <span className="landing-hero-accent">Grow tips.</span>
-            </h1>
-            <p className="landing-hero-desc">
-              Teep lets fans tip creators directly from supported posts, giving creators a simple way to claim, withdraw, or grow tips in an experience that feels native to everyone.
-            </p>
-            <a href={CHROME_STORE_URL} target="_blank" rel="noopener noreferrer" className="landing-hero-cta landing-hero-cta--secondary">
-              <Icon name="puzzle" />
-              {HAS_CHROME_STORE_LISTING ? "Tip from supported posts" : "Join extension beta"}
-            </a>
-            <div className="landing-hero-trust-row" aria-label="Teep benefits">
-              <span className="landing-hero-trust-chip">
-                <Icon name="shield" />
-                Non-custodial
-              </span>
-              <span className="landing-hero-trust-chip">
-                <Icon name="coin" />
-                Stable tips
-              </span>
-              <span className="landing-hero-trust-chip">
-                <Icon name="clock" />
-                Claim anytime
-              </span>
+        <div className="lp-marquee" aria-label="Powered by">
+          <p className="lp-marquee-caption">Powered by open, onchain infrastructure</p>
+          <div className="lp-marquee-viewport">
+            <div className="lp-marquee-track">
+              {[...POWERED_BY, ...POWERED_BY].map((name, i) => (
+                <span className="lp-marquee-item" key={`${name}-${i}`} aria-hidden={i >= POWERED_BY.length}>
+                  {name}
+                </span>
+              ))}
             </div>
           </div>
-          <div className="landing-form-wrap">
-            <div className="landing-glass-card">
-              <span className="landing-form-badge" aria-hidden>LIVE</span>
-              <h3 className="landing-form-title">
-                <Icon name="send" className="landing-form-title-icon" />
-                Send a Tip
-              </h3>
-              <div className="landing-form-field">
-                <label className="landing-form-label">Content link</label>
-                <div className="landing-form-input-wrap">
-                  <Icon name="link" className="landing-form-input-icon" />
-                  <input
-                    type="url"
-                    className="landing-form-input"
-                    placeholder="Paste post URL"
-                    value={contentUrl}
-                    onChange={(e) => setContentUrl(e.target.value)}
-                    aria-label="Content link"
-                  />
-                </div>
-              </div>
-              <div className="landing-form-field">
-                <label className="landing-form-label">Tip amount (USD)</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  className="landing-form-input"
-                  placeholder="5.00"
-                  value={tipAmount}
-                  onChange={(e) => setTipAmount(e.target.value)}
-                  aria-label="Tip amount USD"
-                />
-              </div>
-              <div className="landing-form-field">
-                <label className="landing-form-label">Creator</label>
-                <div className="landing-form-creator-block">
-                  {resolvedCreator ? (
-                    <>
-                      <div className="landing-form-creator-avatar-wrap">
-                        <img
-                          src={getAvatarUrls(resolvedCreator).primary}
-                          alt=""
-                          className="landing-form-creator-avatar-img"
-                          onError={(e) => {
-                            e.currentTarget.src = getAvatarUrls(resolvedCreator).fallback;
-                            e.currentTarget.onerror = null;
-                          }}
-                        />
-                        <div className="landing-form-creator-avatar" aria-hidden />
-                      </div>
-                      <div className="landing-form-creator-info">
-                        <p className="landing-form-creator-name">@{resolvedCreator}</p>
-                        <p className="landing-form-creator-meta">Creator</p>
-                      </div>
-                      <Icon name="checkCircle" className="landing-form-creator-verified" />
-                    </>
-                  ) : (
-                    <span className="landing-form-creator-placeholder">-</span>
-                  )}
-                </div>
-              </div>
-              {authenticated && !address ? (
-                <div className="landing-form-create-wallet">
-                  <p className="landing-form-create-wallet-text">
-                    Create your Teep wallet to send tips. This is a one-time step.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      setCreateWalletError(null);
-                      setCreateWalletLoading(true);
-                      try {
-                        await createWallet();
-                      } catch (err) {
-                        setCreateWalletLoading(false);
-                        setCreateWalletError(err instanceof Error ? err.message : "Failed to create wallet");
-                      }
+        </div>
+      </section>
+
+      {/* Three pillars */}
+      <section className="lp-pillars">
+        <div className="lp-pillar">
+          <div className="lp-pillar-icon"><Icon name="bolt" /></div>
+          <h3>Tipping</h3>
+          <p>Send a tip from the post itself. The Teep button appears natively, right beside share and bookmark.</p>
+        </div>
+        <div className="lp-pillar">
+          <div className="lp-pillar-icon"><Icon name="wallet" /></div>
+          <h3>Claiming</h3>
+          <p>Creators receive tips before they ever sign up, and claim or withdraw them whenever they are ready.</p>
+        </div>
+        <div className="lp-pillar">
+          <div className="lp-pillar-icon"><Icon name="coin" /></div>
+          <h3>Growing</h3>
+          <p>Idle tip balances can be put to work with simple growth tools, straight from the creator dashboard.</p>
+        </div>
+      </section>
+
+      {/* Stats */}
+      <section className="lp-stats" id="stats">
+        <h2 className="lp-section-title">Where fans support creators onchain.</h2>
+        <p className="lp-section-sub">Every tip is an indexed onchain event — balances, receipts, and stats anyone can verify.</p>
+        <div className="lp-stats-grid">
+          <div className="lp-stat">
+            <p className="lp-stat-value">{stats ? `$${stats.totalVolumeUsd}+` : "—"}</p>
+            <p className="lp-stat-label">Tipped to creators</p>
+          </div>
+          <div className="lp-stat">
+            <p className="lp-stat-value">{stats ? `${stats.totalTips.toLocaleString()}+` : "—"}</p>
+            <p className="lp-stat-label">Tips sent</p>
+          </div>
+          <div className="lp-stat">
+            <p className="lp-stat-value">{stats ? `${stats.distinctTippers.toLocaleString()}+` : "—"}</p>
+            <p className="lp-stat-label">Active tippers</p>
+          </div>
+          <div className="lp-stat">
+            <p className="lp-stat-value">{stats ? `${stats.verifiedCreators.toLocaleString()}+` : "—"}</p>
+            <p className="lp-stat-label">Verified creators</p>
+          </div>
+        </div>
+      </section>
+
+      {/* Platform grid */}
+      <section className="lp-platform">
+        <div className="lp-platform-head">
+          <h2 className="lp-platform-title">
+            <span className="lp-platform-brand">Teep</span> is the platform for creator support at scale.
+          </h2>
+          <Link to="/leaderboard" className="lp-platform-link">
+            Explore activity <Icon name="arrowRight" />
+          </Link>
+        </div>
+        <div className="lp-platform-grid">
+          <div className="lp-card">
+            <PlatformArt kind="instant" />
+            <h3>Instant, low-cost, 24/7</h3>
+            <p>Tips settle onchain in seconds, in stable dollars, any hour of any day. No invoices, no payout windows.</p>
+          </div>
+          <div className="lp-card">
+            <PlatformArt kind="waiting" />
+            <h3>Tips wait for you</h3>
+            <p>Fans can tip creators who have not joined yet. Funds sit in a deterministic claim wallet only the creator can unlock.</p>
+          </div>
+          <div className="lp-card">
+            <PlatformArt kind="custody" />
+            <h3>Secure &amp; non-custodial</h3>
+            <p>Teep coordinates the experience but never holds funds. Your money. You control it. Always.</p>
+          </div>
+          <div className="lp-card">
+            <PlatformArt kind="native" />
+            <h3>Native, not an island</h3>
+            <p>No new feed to grow. Teep lives where creator attention already lives — inside the post itself.</p>
+          </div>
+        </div>
+      </section>
+
+      {/* Send a tip — functional form */}
+      <section className="lp-tip" id="tip">
+        <div className="lp-tip-copy">
+          <h2 className="lp-section-title">Send a tip in seconds.</h2>
+          <p className="lp-section-sub">Paste a link to a supported post, choose an amount, done. The creator gets the rest.</p>
+          <ul className="lp-tip-points">
+            <li><Icon name="shield" /> Non-custodial</li>
+            <li><Icon name="coin" /> Stable dollars</li>
+            <li><Icon name="clock" /> Claim anytime</li>
+          </ul>
+        </div>
+        <div className="lp-tip-card">
+          <div className="lp-tip-field">
+            <label className="lp-tip-label" htmlFor="lp-tip-url">Content link</label>
+            <div className="lp-tip-input-wrap">
+              <Icon name="link" className="lp-tip-input-icon" />
+              <input
+                id="lp-tip-url"
+                type="url"
+                className="lp-tip-input lp-tip-input--icon"
+                placeholder="Paste post URL"
+                value={contentUrl}
+                onChange={(e) => setContentUrl(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="lp-tip-field">
+            <label className="lp-tip-label" htmlFor="lp-tip-amount">Tip amount (USD)</label>
+            <input
+              id="lp-tip-amount"
+              type="number"
+              min="0"
+              step="0.01"
+              className="lp-tip-input"
+              placeholder="5.00"
+              value={tipAmount}
+              onChange={(e) => setTipAmount(e.target.value)}
+            />
+          </div>
+          <div className="lp-tip-field">
+            <span className="lp-tip-label">Creator</span>
+            <div className="lp-tip-creator">
+              {resolvedCreator ? (
+                <>
+                  <img
+                    src={getAvatarUrls(resolvedCreator).primary}
+                    alt=""
+                    className="lp-tip-creator-avatar"
+                    onError={(e) => {
+                      e.currentTarget.src = getAvatarUrls(resolvedCreator).fallback;
+                      e.currentTarget.onerror = null;
                     }}
-                    disabled={createWalletLoading}
-                    className="landing-form-submit"
-                  >
-                    {createWalletLoading ? (
-                      "Creating wallet..."
-                    ) : (
-                      <>
-                        <Icon name="wallet" />
-                        Create Teep wallet
-                      </>
-                    )}
-                  </button>
-                  {createWalletError && (
-                    <p className="landing-form-create-wallet-error" role="alert">
-                      {createWalletError}
-                    </p>
-                  )}
-                </div>
+                  />
+                  <span className="lp-tip-creator-name">@{resolvedCreator}</span>
+                  <Icon name="checkCircle" className="lp-tip-creator-check" />
+                </>
               ) : (
-                <button
-                  type="button"
-                  onClick={handleSendTip}
-                  disabled={!parsed || amountNum <= 0}
-                  className="landing-form-submit"
-                >
-                  <Icon name="bolt" />
-                  SEND TIP
-                </button>
+                <span className="lp-tip-creator-placeholder">Detected from the link</span>
               )}
             </div>
           </div>
-        </div>
-      </section>
-
-      <section className={`landing-stats-v2 ${stats ? "" : "landing-stats-v2--loading"}`} id="stats">
-        <div className="landing-stats-grid">
-          <div className="landing-stat-v2">
-            <p className="landing-stat-value-v2">{stats ? `$${stats.totalVolumeUsd}+` : "-"}</p>
-            <p className="landing-stat-label-v2">Total Tips Sent</p>
-          </div>
-          <div className="landing-stat-v2">
-            <p className="landing-stat-value-v2 landing-stat-primary">{stats ? `${stats.distinctTippers.toLocaleString()}+` : "-"}</p>
-            <p className="landing-stat-label-v2">Active Tippers</p>
-          </div>
-          <div className="landing-stat-v2">
-            <p className="landing-stat-value-v2 landing-stat-success">{stats ? `${stats.verifiedCreators.toLocaleString()}+` : "-"}</p>
-            <p className="landing-stat-label-v2">Verified Creators</p>
-          </div>
-        </div>
-      </section>
-
-      <section className="landing-how-v2" id="how-it-works">
-        <div className="landing-how-v2-header">
-          <h2 className="landing-section-title-v2">How it works</h2>
-          <p className="landing-section-desc">Seamless integration across your favorite platforms. Start in minutes.</p>
-          <div className="landing-tabs">
+          {authenticated && !address ? (
+            <div className="lp-tip-create-wallet">
+              <p>Create your Teep wallet to send tips. This is a one-time step.</p>
+              <button
+                type="button"
+                onClick={async () => {
+                  setCreateWalletError(null);
+                  setCreateWalletLoading(true);
+                  try {
+                    await createWallet();
+                  } catch (err) {
+                    setCreateWalletLoading(false);
+                    setCreateWalletError(err instanceof Error ? err.message : "Failed to create wallet");
+                  }
+                }}
+                disabled={createWalletLoading}
+                className="lp-btn lp-btn--primary lp-btn--block"
+              >
+                {createWalletLoading ? (
+                  "Creating wallet..."
+                ) : (
+                  <>
+                    <Icon name="wallet" />
+                    Create Teep wallet
+                  </>
+                )}
+              </button>
+              {createWalletError && (
+                <p className="lp-tip-error" role="alert">{createWalletError}</p>
+              )}
+            </div>
+          ) : (
             <button
               type="button"
-              className={`landing-tab ${howTab === "tippers" ? "landing-tab-active" : ""}`}
+              onClick={handleSendTip}
+              disabled={!parsed || amountNum <= 0}
+              className="lp-btn lp-btn--primary lp-btn--block"
+            >
+              <Icon name="bolt" />
+              Send tip
+            </button>
+          )}
+        </div>
+      </section>
+
+      {/* How it works */}
+      <section className="lp-how" id="how-it-works">
+        <div className="lp-how-head">
+          <h2 className="lp-section-title">How it works</h2>
+          <p className="lp-section-sub">Native to the platforms you already use. Start in minutes.</p>
+          <div className="lp-tabs" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={howTab === "tippers"}
+              className={`lp-tab ${howTab === "tippers" ? "lp-tab--active" : ""}`}
               onClick={() => setHowTab("tippers")}
             >
               For Tippers
             </button>
             <button
               type="button"
-              className={`landing-tab ${howTab === "creators" ? "landing-tab-active" : ""}`}
+              role="tab"
+              aria-selected={howTab === "creators"}
+              className={`lp-tab ${howTab === "creators" ? "lp-tab--active" : ""}`}
               onClick={() => setHowTab("creators")}
             >
               For Creators
             </button>
           </div>
         </div>
-        <div className="landing-how-v2-grid">
-          <div className="landing-how-v2-steps">
-            {howTab === "tippers" && (
-              <>
-                <div className="landing-step">
-                  <div className="landing-step-num-v2">1</div>
-                  <div>
-                    <h4 className="landing-step-title">Install Extension</h4>
-                    <p className="landing-step-desc">Add Teep to Chrome or Brave. Securely connect your wallet in seconds.</p>
-                  </div>
+        <div className="lp-how-grid">
+          <div className="lp-how-steps">
+            {(howTab === "tippers"
+              ? [
+                  { title: "Install Extension", desc: "Add Teep to Chrome or Brave. Securely connect in seconds." },
+                  { title: "Browse Normally", desc: "The Tip button appears natively beside the share and bookmark actions." },
+                  { title: "Confirm & Send", desc: "Enter the amount and confirm. The creator receives the tip instantly." },
+                ]
+              : [
+                  { title: "Connect Your Account", desc: "Link your creator identity in seconds and make your posts ready to receive tips." },
+                  { title: "Claim Your Page", desc: "Get a dedicated tipping link for your bio and a custom profile page." },
+                  { title: "Receive Tips", desc: "Claim, withdraw, or grow tips from your creator dashboard." },
+                ]
+            ).map((step, i) => (
+              <div className="lp-step" key={step.title}>
+                <div className="lp-step-num">{i + 1}</div>
+                <div>
+                  <h4 className="lp-step-title">{step.title}</h4>
+                  <p className="lp-step-desc">{step.desc}</p>
                 </div>
-                <div className="landing-step">
-                  <div className="landing-step-num-v2">2</div>
-                  <div>
-                    <h4 className="landing-step-title">Browse Normally</h4>
-                    <p className="landing-step-desc">Browse supported platforms as usual. The Tip button appears natively beside the share and bookmark actions.</p>
-                  </div>
-                </div>
-                <div className="landing-step">
-                  <div className="landing-step-num-v2">3</div>
-                  <div>
-                    <h4 className="landing-step-title">Confirm & Send</h4>
-                    <p className="landing-step-desc">Enter the amount and confirm. The creator receives the tip instantly.</p>
-                  </div>
-                </div>
-              </>
-            )}
-            {howTab === "creators" && (
-              <>
-                <div className="landing-step">
-                  <div className="landing-step-num-v2 landing-step-success">1</div>
-                  <div>
-                    <h4 className="landing-step-title">Connect Your Account</h4>
-                    <p className="landing-step-desc">Link your creator identity in seconds and make your posts ready to receive tips.</p>
-                  </div>
-                </div>
-                <div className="landing-step">
-                  <div className="landing-step-num-v2 landing-step-success">2</div>
-                  <div>
-                    <h4 className="landing-step-title">Claim Your Page</h4>
-                    <p className="landing-step-desc">Get a dedicated tipping link for your bio and a custom profile page.</p>
-                  </div>
-                </div>
-                <div className="landing-step">
-                  <div className="landing-step-num-v2 landing-step-success">3</div>
-                  <div>
-                    <h4 className="landing-step-title">Receive Tips</h4>
-                    <p className="landing-step-desc">Claim, withdraw, or grow tips from your creator dashboard.</p>
-                  </div>
-                </div>
-              </>
-            )}
+              </div>
+            ))}
           </div>
-          <div className="landing-how-v2-preview">
+          <div className="lp-how-preview">
             {howTab === "tippers" ? (
-              <div className="landing-how-v2-video-wrap">
+              <div className="lp-how-video-wrap">
                 {!tipperVideoReady && (
-                  <div className="landing-how-video-fallback" aria-hidden>
-                    <div className="landing-how-video-post">
-                      <div className="landing-how-video-avatar" />
-                      <div className="landing-how-video-lines">
+                  <div className="lp-how-video-fallback" aria-hidden>
+                    <div className="lp-how-video-post">
+                      <div className="lp-how-video-avatar" />
+                      <div className="lp-how-video-lines">
                         <span />
                         <span />
                       </div>
                     </div>
-                    <div className="landing-how-video-actions">
+                    <div className="lp-how-video-actions">
                       <span />
                       <span />
                       <strong>Tip</strong>
@@ -693,7 +806,7 @@ export default function Home() {
                   </div>
                 )}
                 <video
-                  className="landing-how-v2-video"
+                  className="lp-how-video"
                   src="/Tipper.mp4"
                   autoPlay
                   muted
@@ -706,20 +819,18 @@ export default function Home() {
                 />
               </div>
             ) : (
-              <div className="landing-how-v2-mockup">
-                <div className="landing-how-v2-mockup-inner">
-                  <div className="landing-how-v2-mockup-row">
-                    <div className="landing-how-v2-mockup-avatar" />
-                    <div className="landing-how-v2-mockup-line" />
-                  </div>
-                  <div className="landing-how-v2-mockup-block" />
-                  <div className="landing-how-v2-mockup-footer">
-                    <div className="landing-how-v2-mockup-btn">Claim your page</div>
-                    <div className="landing-how-v2-mockup-dots">
-                      <span />
-                      <span />
-                      <span />
-                    </div>
+              <div className="lp-how-mockup">
+                <div className="lp-how-mockup-row">
+                  <div className="lp-how-mockup-avatar" />
+                  <div className="lp-how-mockup-line" />
+                </div>
+                <div className="lp-how-mockup-block" />
+                <div className="lp-how-mockup-footer">
+                  <div className="lp-how-mockup-btn">Claim your page</div>
+                  <div className="lp-how-mockup-dots">
+                    <span />
+                    <span />
+                    <span />
                   </div>
                 </div>
               </div>
@@ -728,88 +839,80 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="landing-live-feed">
-        <div className="landing-live-feed-inner">
-          <div className="landing-live-feed-header">
-            <div className="landing-live-feed-title-wrap">
-              <span className="landing-live-feed-dot" aria-hidden />
-              <h3 className="landing-live-feed-title">Live Tip Activity Feed</h3>
-            </div>
-            <Link to="/leaderboard" className="landing-live-feed-view-all">View All Activity</Link>
-          </div>
-          <div className="landing-live-feed-grid">
-            {recentTips.length === 0 ? (
-              <div className="landing-live-feed-empty">No tips yet. Be the first!</div>
-            ) : (
-              recentTips.slice(0, 10).map((tip, index) => {
-                const creator = tip.creatorUsername ?? tip.postAuthorHandle ?? null;
-                const creatorLabel = creator ? `@${creator}` : "Unknown creator";
-                const tipperAvatar = getAvatarUrls(tip.fromAddress);
-                const creatorAvatar = getAvatarUrls(creator ?? "");
-                return (
-                  <div className="landing-live-feed-card glass-panel" key={`${tip.fromAddress}-${tip.timestamp}-${index}`}>
-                    <div className="landing-live-feed-card-row">
-                      <div className="landing-live-feed-avatar-wrap">
-                        <img
-                          src={tipperAvatar.primary}
-                          alt=""
-                          className="landing-live-feed-avatar-img"
-                          onError={(e) => {
-                            e.currentTarget.src = tipperAvatar.fallback;
-                            e.currentTarget.onerror = null;
-                          }}
-                        />
-                        <div className="landing-live-feed-avatar landing-live-feed-avatar-tipper" aria-hidden />
-                      </div>
-                      <span className="landing-live-feed-username truncate">{truncateAddress(tip.fromAddress)}</span>
-                      <div className="landing-live-feed-amount">
-                        <Icon name="bolt" className="landing-live-feed-bolt" />
-                        <span className="landing-live-feed-amount-value">${tip.amountUsd}</span>
-                      </div>
-                    </div>
-                    <div className="landing-live-feed-connector">
-                      <Icon name="arrowRight" className="landing-live-feed-arrow" />
-                    </div>
-                    <div className="landing-live-feed-card-row landing-live-feed-card-row-bottom">
-                      <div className="landing-live-feed-avatar-wrap">
-                        <img
-                          src={creatorAvatar.primary}
-                          alt=""
-                          className="landing-live-feed-avatar-img"
-                          onError={(e) => {
-                            e.currentTarget.src = creatorAvatar.fallback;
-                            e.currentTarget.onerror = null;
-                          }}
-                        />
-                        <div className="landing-live-feed-avatar landing-live-feed-avatar-creator" aria-hidden />
-                      </div>
-                      <span className="landing-live-feed-username truncate">{creatorLabel}</span>
-                      {tip.postUrl ? (
-                        <a href={tip.postUrl} target="_blank" rel="noopener noreferrer" className="landing-live-feed-view-post" aria-label="View post">
-                          <XLogoIcon className="landing-live-feed-x-icon" />
-                          <span>View post</span>
-                        </a>
-                      ) : (
-                        <span className="landing-live-feed-view-post landing-live-feed-view-post-placeholder" aria-hidden>
-                          <XLogoIcon className="landing-live-feed-x-icon" />
-                        </span>
-                      )}
-                    </div>
+      {/* Live activity */}
+      <section className="lp-live">
+        <div className="lp-live-head">
+          <h2 className="lp-section-title">
+            <span className="lp-live-dot" aria-hidden />
+            Live on Teep
+          </h2>
+          <Link to="/leaderboard" className="lp-platform-link">
+            View all activity <Icon name="arrowRight" />
+          </Link>
+        </div>
+        <div className="lp-live-grid">
+          {recentTips.length === 0 ? (
+            <div className="lp-live-empty">No tips yet. Be the first!</div>
+          ) : (
+            recentTips.slice(0, 8).map((tip, index) => {
+              const creator = tip.creatorUsername ?? tip.postAuthorHandle ?? null;
+              const creatorLabel = creator ? `@${creator}` : "Unknown creator";
+              const tipperAvatar = getAvatarUrls(tip.fromAddress);
+              const creatorAvatar = getAvatarUrls(creator ?? "");
+              return (
+                <div className="lp-live-card" key={`${tip.fromAddress}-${tip.timestamp}-${index}`}>
+                  <div className="lp-live-row">
+                    <img
+                      src={tipperAvatar.primary}
+                      alt=""
+                      className="lp-live-avatar"
+                      onError={(e) => {
+                        e.currentTarget.src = tipperAvatar.fallback;
+                        e.currentTarget.onerror = null;
+                      }}
+                    />
+                    <span className="lp-live-name">{truncateAddress(tip.fromAddress)}</span>
+                    <span className="lp-live-amount">${tip.amountUsd}</span>
                   </div>
-                );
-              })
-            )}
-          </div>
+                  <div className="lp-live-connector" aria-hidden>
+                    <Icon name="arrowRight" />
+                  </div>
+                  <div className="lp-live-row">
+                    <img
+                      src={creatorAvatar.primary}
+                      alt=""
+                      className="lp-live-avatar"
+                      onError={(e) => {
+                        e.currentTarget.src = creatorAvatar.fallback;
+                        e.currentTarget.onerror = null;
+                      }}
+                    />
+                    <span className="lp-live-name">{creatorLabel}</span>
+                    {tip.postUrl ? (
+                      <a href={tip.postUrl} target="_blank" rel="noopener noreferrer" className="lp-live-post" aria-label="View post">
+                        <XLogoIcon className="lp-live-x" />
+                      </a>
+                    ) : (
+                      <span className="lp-live-post lp-live-post--muted" aria-hidden>
+                        <XLogoIcon className="lp-live-x" />
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
       </section>
 
-      <section className="landing-faq-v2" id="faq">
-        <h2 className="landing-section-title-v2">Frequently Asked Questions</h2>
-        <div className="landing-faq-list">
+      {/* FAQ */}
+      <section className="lp-faq" id="faq">
+        <h2 className="lp-section-title">Frequently asked questions</h2>
+        <div className="lp-faq-list">
           {FAQ_ITEMS.map((item, idx) => (
-            <details className="landing-faq-item" open={faqOpenSet.has(idx)} key={item.q}>
+            <details className="lp-faq-item" open={faqOpenSet.has(idx)} key={item.q}>
               <summary
-                className="landing-faq-question"
+                className="lp-faq-q"
                 onClick={(e) => {
                   e.preventDefault();
                   setFaqOpenSet((current) => {
@@ -821,19 +924,34 @@ export default function Home() {
                 }}
               >
                 {item.q}
+                <span className="lp-faq-toggle" aria-hidden>{faqOpenSet.has(idx) ? "−" : "+"}</span>
               </summary>
-              <div className="landing-faq-answer">{item.a}</div>
+              <div className="lp-faq-a">{item.a}</div>
             </details>
           ))}
         </div>
       </section>
 
-      <section className="landing-cta-v2">
-        <h2 className="landing-cta-title-v2">Have a favorite creator you wanna tip?</h2>
-        <p className="landing-cta-desc">Join people supporting their favorite creators directly without the middlemen.</p>
-        <a href={CHROME_STORE_URL} target="_blank" rel="noopener noreferrer" className="landing-cta-btn-v2">
-          {HAS_CHROME_STORE_LISTING ? "Get Teep Extension" : "Join Teep Beta"}
-        </a>
+      {/* CTA band — leads into the purple footer */}
+      <section className="lp-cta">
+        <div className="lp-cta-wave" aria-hidden>
+          {Array.from({ length: 36 }, (_, i) => (
+            <span key={i} style={{ animationDelay: `${(i % 9) * 0.12}s` }} />
+          ))}
+        </div>
+        <div className="lp-cta-inner">
+          <h2 className="lp-cta-title">Start earning on Teep.</h2>
+          <p className="lp-cta-sub">Support from your fans, in your control. Fast, stable, and always on.</p>
+          <div className="lp-cta-btns">
+            <a href={CHROME_STORE_URL} target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn--inverse">
+              <Icon name="puzzle" />
+              {HAS_CHROME_STORE_LISTING ? "Get the Extension" : "Join the Beta"}
+            </a>
+            <Link to="/dashboard" className="lp-btn lp-btn--ghost">
+              Open Dashboard
+            </Link>
+          </div>
+        </div>
       </section>
 
       <LoginModal

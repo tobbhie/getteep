@@ -8,6 +8,7 @@ import { AccountRoleProvider } from "./context/AccountRoleContext";
 import { PRIVY_APP_ID } from "./config";
 import { arcTestnet } from "./chains";
 import "./index.css";
+import "./landing.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
