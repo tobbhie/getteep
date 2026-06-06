@@ -61,51 +61,105 @@ function XLogoIcon({ className }: { className?: string }) {
   );
 }
 
-/* Small scattered pixel-glyph decorations, echoing the reference hero */
-function LpGlyph({ className, variant }: { className: string; variant: 1 | 2 | 3 }) {
-  if (variant === 1) {
-    return (
-      <svg className={`lp-glyph ${className}`} viewBox="0 0 56 56" width="56" height="56" aria-hidden>
-        <g fill="currentColor">
-          <rect x="4" y="20" width="3" height="3" />
-          <rect x="12" y="12" width="3" height="3" />
-          <rect x="20" y="8" width="3" height="3" />
-          <rect x="28" y="14" width="3" height="3" />
-          <rect x="16" y="24" width="3" height="3" />
-          <rect x="24" y="30" width="3" height="3" />
-          <rect x="36" y="22" width="3" height="3" />
-          <rect x="40" y="36" width="3" height="3" />
-          <rect x="30" y="44" width="3" height="3" />
-          <rect x="10" y="38" width="3" height="3" />
-        </g>
-      </svg>
-    );
-  }
-  if (variant === 2) {
-    return (
-      <svg className={`lp-glyph ${className}`} viewBox="0 0 64 40" width="64" height="40" aria-hidden>
-        <g fill="currentColor">
-          <rect x="2" y="18" width="2" height="6" />
-          <rect x="8" y="12" width="2" height="16" />
-          <rect x="14" y="16" width="2" height="10" />
-          <rect x="20" y="6" width="2" height="28" />
-          <rect x="26" y="14" width="2" height="14" />
-          <rect x="32" y="10" width="2" height="20" />
-          <rect x="38" y="17" width="2" height="8" />
-          <rect x="44" y="13" width="2" height="15" />
-          <rect x="50" y="18" width="2" height="6" />
-          <rect x="56" y="15" width="2" height="11" />
-        </g>
-      </svg>
-    );
-  }
+/* Animated dot-matrix decorations, echoing the reference hero: pixel
+   "clouds" that flicker in and dissolve, plus digital-rain streaks.
+   Deterministic PRNG so every render produces the same cluster. */
+function mulberry32(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a += 0x6d2b79f5;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const PX_COLORS = ["#5b2ee5", "#8f6cf0", "#b9aa8f", "#c7c0b0"];
+
+interface PxCell {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: string;
+  delay: number;
+  dur: number;
+}
+
+function PixelCloud({
+  className,
+  seed,
+  variant = "cloud",
+}: {
+  className: string;
+  seed: number;
+  variant?: "cloud" | "rain";
+}) {
+  const cells = useMemo<PxCell[]>(() => {
+    const rnd = mulberry32(seed);
+    const out: PxCell[] = [];
+    if (variant === "rain") {
+      for (let c = 0; c < 9; c++) {
+        const x = 3 + c * 9;
+        let y = rnd() * 18;
+        while (y < 112) {
+          const h = 6 + rnd() * 16;
+          if (rnd() < 0.7) {
+            out.push({
+              x,
+              y,
+              w: 2.5,
+              h,
+              color: PX_COLORS[Math.floor(rnd() * PX_COLORS.length)],
+              delay: rnd() * 4,
+              dur: 2 + rnd() * 3,
+            });
+          }
+          y += h + 4 + rnd() * 14;
+        }
+      }
+    } else {
+      const cols = 12;
+      const rows = 9;
+      for (let i = 0; i < cols; i++) {
+        for (let j = 0; j < rows; j++) {
+          const dx = (i - cols / 2) / (cols / 2);
+          const dy = (j - rows / 2) / (rows / 2);
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (rnd() < 0.8 - dist * 0.6) {
+            out.push({
+              x: i * 7 + rnd() * 2,
+              y: j * 7 + rnd() * 2,
+              w: 3 + rnd() * 1.5,
+              h: 3.5 + rnd() * 2,
+              color: PX_COLORS[Math.floor(rnd() * PX_COLORS.length)],
+              delay: rnd() * 5,
+              dur: 2.5 + rnd() * 3.5,
+            });
+          }
+        }
+      }
+    }
+    return out;
+  }, [seed, variant]);
+
+  const viewBox = variant === "rain" ? "0 0 84 118" : "0 0 90 70";
+  const width = variant === "rain" ? 100 : 132;
   return (
-    <svg className={`lp-glyph ${className}`} viewBox="0 0 48 48" width="48" height="48" aria-hidden>
-      <g fill="none" stroke="currentColor" strokeWidth="1.5">
-        <path d="M10 6v8M6 10h8" />
-        <path d="M36 28v8M32 32h8" />
-        <path d="M22 38v6M19 41h6" />
-      </g>
+    <svg className={`lp-px ${className}`} viewBox={viewBox} width={width} aria-hidden>
+      {cells.map((c, i) => (
+        <rect
+          key={i}
+          x={c.x}
+          y={c.y}
+          width={c.w}
+          height={c.h}
+          fill={c.color}
+          className="lp-px-cell"
+          style={{ animationDelay: `${c.delay}s`, animationDuration: `${c.dur}s` }}
+        />
+      ))}
     </svg>
   );
 }
@@ -245,6 +299,7 @@ export default function Home() {
   const [createWalletLoading, setCreateWalletLoading] = useState(false);
   const [createWalletError, setCreateWalletError] = useState<string | null>(null);
   const [tipperVideoReady, setTipperVideoReady] = useState(false);
+  const [tipModalOpen, setTipModalOpen] = useState(false);
   const { createWallet } = useCreateWallet({
     onSuccess: () => {
       setCreateWalletLoading(false);
@@ -255,6 +310,19 @@ export default function Home() {
       setCreateWalletError(typeof err === "string" ? err : "Failed to create wallet");
     },
   });
+
+  useEffect(() => {
+    if (!tipModalOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setTipModalOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [tipModalOpen]);
 
   useEffect(() => {
     if (!import.meta.env.DEV || !ready || !authenticated) return;
@@ -515,11 +583,11 @@ export default function Home() {
     <div className="lp">
       {/* Hero — centered statement, two CTAs, scattered glyphs */}
       <section className="lp-hero">
-        <LpGlyph className="lp-glyph--1" variant={1} />
-        <LpGlyph className="lp-glyph--2" variant={2} />
-        <LpGlyph className="lp-glyph--3" variant={3} />
-        <LpGlyph className="lp-glyph--4" variant={1} />
-        <LpGlyph className="lp-glyph--5" variant={2} />
+        <PixelCloud className="lp-px--1" seed={7} variant="cloud" />
+        <PixelCloud className="lp-px--2" seed={23} variant="rain" />
+        <PixelCloud className="lp-px--3" seed={41} variant="cloud" />
+        <PixelCloud className="lp-px--4" seed={59} variant="rain" />
+        <PixelCloud className="lp-px--5" seed={97} variant="cloud" />
         <div className="lp-hero-inner">
           <h1 className="lp-hero-title">
             The tipping layer
@@ -534,10 +602,10 @@ export default function Home() {
               <Icon name="puzzle" />
               {HAS_CHROME_STORE_LISTING ? "Get the Extension" : "Join the Beta"}
             </a>
-            <a href="#tip" className="lp-btn lp-btn--secondary">
+            <button type="button" className="lp-btn lp-btn--secondary" onClick={() => setTipModalOpen(true)}>
               <Icon name="send" />
               Send a tip
-            </a>
+            </button>
           </div>
         </div>
         <div className="lp-marquee" aria-label="Powered by">
@@ -628,112 +696,6 @@ export default function Home() {
             <h3>Native, not an island</h3>
             <p>No new feed to grow. Teep lives where creator attention already lives — inside the post itself.</p>
           </div>
-        </div>
-      </section>
-
-      {/* Send a tip — functional form */}
-      <section className="lp-tip" id="tip">
-        <div className="lp-tip-copy">
-          <h2 className="lp-section-title">Send a tip in seconds.</h2>
-          <p className="lp-section-sub">Paste a link to a supported post, choose an amount, done. The creator gets the rest.</p>
-          <ul className="lp-tip-points">
-            <li><Icon name="shield" /> Non-custodial</li>
-            <li><Icon name="coin" /> Stable dollars</li>
-            <li><Icon name="clock" /> Claim anytime</li>
-          </ul>
-        </div>
-        <div className="lp-tip-card">
-          <div className="lp-tip-field">
-            <label className="lp-tip-label" htmlFor="lp-tip-url">Content link</label>
-            <div className="lp-tip-input-wrap">
-              <Icon name="link" className="lp-tip-input-icon" />
-              <input
-                id="lp-tip-url"
-                type="url"
-                className="lp-tip-input lp-tip-input--icon"
-                placeholder="Paste post URL"
-                value={contentUrl}
-                onChange={(e) => setContentUrl(e.target.value)}
-              />
-            </div>
-          </div>
-          <div className="lp-tip-field">
-            <label className="lp-tip-label" htmlFor="lp-tip-amount">Tip amount (USD)</label>
-            <input
-              id="lp-tip-amount"
-              type="number"
-              min="0"
-              step="0.01"
-              className="lp-tip-input"
-              placeholder="5.00"
-              value={tipAmount}
-              onChange={(e) => setTipAmount(e.target.value)}
-            />
-          </div>
-          <div className="lp-tip-field">
-            <span className="lp-tip-label">Creator</span>
-            <div className="lp-tip-creator">
-              {resolvedCreator ? (
-                <>
-                  <img
-                    src={getAvatarUrls(resolvedCreator).primary}
-                    alt=""
-                    className="lp-tip-creator-avatar"
-                    onError={(e) => {
-                      e.currentTarget.src = getAvatarUrls(resolvedCreator).fallback;
-                      e.currentTarget.onerror = null;
-                    }}
-                  />
-                  <span className="lp-tip-creator-name">@{resolvedCreator}</span>
-                  <Icon name="checkCircle" className="lp-tip-creator-check" />
-                </>
-              ) : (
-                <span className="lp-tip-creator-placeholder">Detected from the link</span>
-              )}
-            </div>
-          </div>
-          {authenticated && !address ? (
-            <div className="lp-tip-create-wallet">
-              <p>Create your Teep wallet to send tips. This is a one-time step.</p>
-              <button
-                type="button"
-                onClick={async () => {
-                  setCreateWalletError(null);
-                  setCreateWalletLoading(true);
-                  try {
-                    await createWallet();
-                  } catch (err) {
-                    setCreateWalletLoading(false);
-                    setCreateWalletError(err instanceof Error ? err.message : "Failed to create wallet");
-                  }
-                }}
-                disabled={createWalletLoading}
-                className="lp-btn lp-btn--primary lp-btn--block"
-              >
-                {createWalletLoading ? (
-                  "Creating wallet..."
-                ) : (
-                  <>
-                    <Icon name="wallet" />
-                    Create Teep wallet
-                  </>
-                )}
-              </button>
-              {createWalletError && (
-                <p className="lp-tip-error" role="alert">{createWalletError}</p>
-              )}
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={handleSendTip}
-              disabled={!parsed || amountNum <= 0}
-              className="lp-btn lp-btn--primary lp-btn--block"
-            >
-              <Icon name="bolt" />
-              Send tip
-            </button>
-          )}
         </div>
       </section>
 
@@ -953,6 +915,121 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      {tipModalOpen && (
+        <div className="lp-modal-overlay" role="dialog" aria-modal="true" aria-label="Send a tip" onClick={() => setTipModalOpen(false)}>
+          <div className="lp-modal" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="lp-modal-close" onClick={() => setTipModalOpen(false)} aria-label="Close">
+              ×
+            </button>
+            <h3 className="lp-modal-title">
+              <Icon name="send" />
+              Send a tip
+            </h3>
+            <p className="lp-modal-sub">Paste a link to a supported post, choose an amount, done. The creator gets the rest.</p>
+            <div className="lp-tip-field">
+              <label className="lp-tip-label" htmlFor="lp-tip-url">Content link</label>
+              <div className="lp-tip-input-wrap">
+                <Icon name="link" className="lp-tip-input-icon" />
+                <input
+                  id="lp-tip-url"
+                  type="url"
+                  className="lp-tip-input lp-tip-input--icon"
+                  placeholder="Paste post URL"
+                  value={contentUrl}
+                  onChange={(e) => setContentUrl(e.target.value)}
+                  autoFocus
+                />
+              </div>
+            </div>
+            <div className="lp-tip-field">
+              <label className="lp-tip-label" htmlFor="lp-tip-amount">Tip amount (USD)</label>
+              <input
+                id="lp-tip-amount"
+                type="number"
+                min="0"
+                step="0.01"
+                className="lp-tip-input"
+                placeholder="5.00"
+                value={tipAmount}
+                onChange={(e) => setTipAmount(e.target.value)}
+              />
+            </div>
+            <div className="lp-tip-field">
+              <span className="lp-tip-label">Creator</span>
+              <div className="lp-tip-creator">
+                {resolvedCreator ? (
+                  <>
+                    <img
+                      src={getAvatarUrls(resolvedCreator).primary}
+                      alt=""
+                      className="lp-tip-creator-avatar"
+                      onError={(e) => {
+                        e.currentTarget.src = getAvatarUrls(resolvedCreator).fallback;
+                        e.currentTarget.onerror = null;
+                      }}
+                    />
+                    <span className="lp-tip-creator-name">@{resolvedCreator}</span>
+                    <Icon name="checkCircle" className="lp-tip-creator-check" />
+                  </>
+                ) : (
+                  <span className="lp-tip-creator-placeholder">Detected from the link</span>
+                )}
+              </div>
+            </div>
+            {authenticated && !address ? (
+              <div className="lp-tip-create-wallet">
+                <p>Create your Teep wallet to send tips. This is a one-time step.</p>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setCreateWalletError(null);
+                    setCreateWalletLoading(true);
+                    try {
+                      await createWallet();
+                    } catch (err) {
+                      setCreateWalletLoading(false);
+                      setCreateWalletError(err instanceof Error ? err.message : "Failed to create wallet");
+                    }
+                  }}
+                  disabled={createWalletLoading}
+                  className="lp-btn lp-btn--primary lp-btn--block"
+                >
+                  {createWalletLoading ? (
+                    "Creating wallet..."
+                  ) : (
+                    <>
+                      <Icon name="wallet" />
+                      Create Teep wallet
+                    </>
+                  )}
+                </button>
+                {createWalletError && (
+                  <p className="lp-tip-error" role="alert">{createWalletError}</p>
+                )}
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setTipModalOpen(false);
+                  handleSendTip();
+                }}
+                disabled={!parsed || amountNum <= 0}
+                className="lp-btn lp-btn--primary lp-btn--block"
+              >
+                <Icon name="bolt" />
+                Send tip
+              </button>
+            )}
+            <ul className="lp-tip-points lp-tip-points--modal">
+              <li><Icon name="shield" /> Non-custodial</li>
+              <li><Icon name="coin" /> Stable dollars</li>
+              <li><Icon name="clock" /> Claim anytime</li>
+            </ul>
+          </div>
+        </div>
+      )}
 
       <LoginModal
         open={loginModalOpen}
