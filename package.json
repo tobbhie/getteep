@@ -30,9 +30,6 @@
     "x-agent:build": "npm run build --workspace=x-agent",
     "security:audit:runtime": "npm audit --omit=dev --audit-level=high --workspaces"
   },
-  "dependencies": {
-    "permissionless": "^0.2.57"
-  },
   "overrides": {
     "axios": "^1.16.0",
     "bn.js": "^5.2.3",
