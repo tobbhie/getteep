@@ -17,17 +17,20 @@ Use the repository root and `railway.json`.
 - Build command: `npm run backend:build`
 - Pre-deploy command: `npm run backend:db:migrate:prod`
 - Start command: `npm run start --workspace=backend`
-- Health check: `/health/live`
+- Backend-only health check: `/health/live`
 
 The backend no longer builds the web app in this split-service setup, so it does
 not need `VITE_*` variables. It only needs backend runtime variables.
 
-Use `/health/live` for Railway liveness. `/health` and `/health/ready` can
-report degraded while the indexer catches up and should not restart the service.
+If you configure a Railway health check on the backend service, use
+`/health/live`. Do not apply that health check to the web or x-agent services.
+`/health` and `/health/ready` can report degraded while the indexer catches up
+and should not restart the service.
 
 ### Backend Variables
 
 ```env
+TEEP_RAILWAY_SERVICE=backend
 NODE_ENV=production
 TRUST_PROXY=true
 PORT=3001
@@ -87,6 +90,7 @@ browser bundle at build time.
 ### Web Variables
 
 ```env
+TEEP_RAILWAY_SERVICE=web
 NODE_ENV=production
 VITE_API_URL=https://YOUR_BACKEND_DOMAIN
 VITE_WEB_APP_URL=https://YOUR_WEB_DOMAIN
@@ -119,6 +123,7 @@ x-agent/railway.json
 ### X Agent Variables
 
 ```env
+TEEP_RAILWAY_SERVICE=x-agent
 NODE_ENV=production
 TEEP_BACKEND_URL=https://YOUR_BACKEND_DOMAIN
 X_AGENT_TOKEN=...

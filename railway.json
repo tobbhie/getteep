@@ -2,13 +2,11 @@
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
     "builder": "NIXPACKS",
-    "buildCommand": "npm run backend:build"
+    "buildCommand": "node scripts/railway-service.js build"
   },
   "deploy": {
-    "preDeployCommand": "npm run backend:db:migrate:prod",
-    "startCommand": "npm run start --workspace=backend",
-    "healthcheckPath": "/health/live",
-    "healthcheckTimeout": 300,
+    "preDeployCommand": "node scripts/railway-service.js migrate",
+    "startCommand": "node scripts/railway-service.js start",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }
