@@ -39,6 +39,10 @@ export default defineConfig(({ mode }) => {
         find: /^permissionless\/accounts$/,
         replacement: resolve(__dirname, "node_modules/permissionless/_esm/accounts/index.js"),
       },
+      {
+        find: /^permissionless\/clients\/pimlico$/,
+        replacement: resolve(__dirname, "node_modules/permissionless/_esm/clients/pimlico.js"),
+      },
     ],
   },
   server: {
