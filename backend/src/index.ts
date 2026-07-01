@@ -3,6 +3,7 @@ dotenv.config();
 
 import express from "express";
 import cors from "cors";
+import type { CorsOptions } from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { initDb } from "./db/database";
@@ -26,12 +27,61 @@ import { mountWebProfileRenderer } from "./services/webProfileRenderer";
 
 const PORT = parseInt(process.env.PORT || "3001");
 const LOCAL_URL_RE = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i;
+const DEFAULT_PRODUCTION_CORS_ORIGINS = [
+  "https://getteep.xyz",
+  "https://www.getteep.xyz",
+];
+
+function splitCsv(value: string | undefined): string[] {
+  return (value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function configuredCorsOrigins(): string[] {
+  return [
+    ...splitCsv(process.env.CORS_ORIGIN),
+    ...splitCsv(process.env.CORS_ORIGINS),
+    ...splitCsv(process.env.CHROME_EXTENSION_ORIGINS),
+    ...splitCsv(process.env.WEB_APP_URL),
+    ...splitCsv(process.env.RECEIPT_BASE_URL),
+    ...(process.env.NODE_ENV === "production" ? DEFAULT_PRODUCTION_CORS_ORIGINS : []),
+  ].filter((value, index, values) => values.indexOf(value) === index);
+}
+
+function isAllowedOrigin(origin: string, allowedOrigins: Set<string>): boolean {
+  if (allowedOrigins.has(origin)) return true;
+  if (process.env.NODE_ENV !== "production" && LOCAL_URL_RE.test(origin)) return true;
+  if (process.env.NODE_ENV !== "production" && /^chrome-extension:\/\/[a-z]{32}$/i.test(origin)) return true;
+
+  try {
+    const url = new URL(origin);
+    return process.env.NODE_ENV !== "production" && url.hostname.endsWith(".ngrok-free.app");
+  } catch {
+    return false;
+  }
+}
+
+const corsOrigins = configuredCorsOrigins();
+const corsOriginSet = new Set(corsOrigins);
+const corsOptions: CorsOptions = {
+  origin: (origin, callback) => {
+    if (!origin || isAllowedOrigin(origin, corsOriginSet)) {
+      callback(null, true);
+      return;
+    }
+    callback(null, false);
+  },
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  maxAge: 86400,
+};
 
 function assertProductionEnv() {
   if (process.env.NODE_ENV !== "production") return;
 
   const required = [
-    "CORS_ORIGIN",
     "WEB_APP_URL",
     "RECEIPT_BASE_URL",
     "ATTESTATION_PRIVATE_KEY",
@@ -51,8 +101,12 @@ function assertProductionEnv() {
     throw new Error(`Production backend is missing required env: ${missing.join(", ")}`);
   }
 
-  for (const key of ["CORS_ORIGIN", "WEB_APP_URL", "RECEIPT_BASE_URL"]) {
-    if (LOCAL_URL_RE.test(process.env[key] || "")) {
+  if (!configuredCorsOrigins().length) {
+    throw new Error("Production backend requires at least one configured CORS origin.");
+  }
+
+  for (const key of ["CORS_ORIGIN", "CORS_ORIGINS", "CHROME_EXTENSION_ORIGINS", "WEB_APP_URL", "RECEIPT_BASE_URL"]) {
+    if (splitCsv(process.env[key]).some((value) => LOCAL_URL_RE.test(value))) {
       throw new Error(`Production backend cannot use a localhost ${key}.`);
     }
   }
@@ -97,10 +151,8 @@ app.set("trust proxy", process.env.TRUST_PROXY === "true" ? 1 : false);
 
 // Middleware
 app.use(helmet() as any);
-app.use(cors({
-  origin: process.env.CORS_ORIGIN || false,
-  methods: ["GET", "POST"],
-}) as any);
+app.use(cors(corsOptions) as any);
+app.options("*", cors(corsOptions) as any);
 app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || "64kb" }));
 
 // Rate limiting

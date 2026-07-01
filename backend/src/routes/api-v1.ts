@@ -220,6 +220,34 @@ function normalizeTipAmount(value: unknown): string | null {
   return amount.toFixed(2);
 }
 
+function emptyDiscoverPayload(reason = "discover_unavailable") {
+  return {
+    algorithm: {
+      version: "discover-beta-v1",
+      signals: [
+        "recent tips + unique supporters",
+        "unclaimed support + recent activity",
+        "high re-tip activity",
+        "similar to creators you tipped",
+      ],
+    },
+    trendingPosts: [],
+    recommendedCreators: [],
+    topCreators: [],
+    topCreatorsAllTime: [],
+    unclaimedCreators: [],
+    tippedBefore: [],
+    orbit: {
+      connections: 0,
+      directTips: 0,
+      unclaimed: 0,
+      trending: 0,
+    },
+    degraded: true,
+    reason,
+  };
+}
+
 function boolInt(value: unknown, fallback = true): boolean {
   if (typeof value === "boolean") return value;
   if (value === 0 || value === 1) return value === 1;
@@ -854,32 +882,39 @@ router.post("/wallet/:address/delete-local-data", async (req: Request, res: Resp
 });
 
 router.get("/wallet/:address/notifications", async (req: Request, res: Response) => {
-  const address = String(req.params.address || "").toLowerCase();
-  if (!isAddress(address)) {
-    err(res, 400, "Invalid account address");
-    return;
+  try {
+    const address = String(req.params.address || "").toLowerCase();
+    if (!isAddress(address)) {
+      err(res, 400, "Invalid account address");
+      return;
+    }
+    const page = Math.max(1, Number(req.query.page || 1) || 1);
+    const limit = Math.min(20, Math.max(1, Number(req.query.limit || 7) || 7));
+    const db = getDb();
+    const total = await db.prepare("SELECT COUNT(*) as count FROM user_notifications WHERE user_address = ?").get(address) as { count: number | string };
+    const unread = await db.prepare("SELECT COUNT(*) as count FROM user_notifications WHERE user_address = ? AND status = 'unread'").get(address) as { count: number | string };
+    const records = (await db
+      .prepare(
+        `SELECT id, type, title, body, status, metadata_json as metadataJson, created_at as createdAt
+         FROM user_notifications
+         WHERE user_address = ?
+         ORDER BY created_at DESC
+         LIMIT ? OFFSET ?`
+      )
+      .all(address, limit, (page - 1) * limit))
+      .map((row: any) => ({
+        ...row,
+        metadata: row.metadataJson ? JSON.parse(row.metadataJson) : null,
+        metadataJson: undefined,
+      }));
+    res.set("Cache-Control", "private, no-store");
+    res.json({ page, limit, total: Number(total.count), unread: Number(unread.count), records });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[API v1] Notifications failed:", message);
+    res.set("Cache-Control", "private, no-store");
+    res.status(200).json({ page: 1, limit: 7, total: 0, unread: 0, records: [], degraded: true });
   }
-  const page = Math.max(1, Number(req.query.page || 1) || 1);
-  const limit = Math.min(20, Math.max(1, Number(req.query.limit || 7) || 7));
-  const db = getDb();
-  const total = await db.prepare("SELECT COUNT(*) as count FROM user_notifications WHERE user_address = ?").get(address) as { count: number | string };
-  const unread = await db.prepare("SELECT COUNT(*) as count FROM user_notifications WHERE user_address = ? AND status = 'unread'").get(address) as { count: number | string };
-  const records = (await db
-    .prepare(
-      `SELECT id, type, title, body, status, metadata_json as metadataJson, created_at as createdAt
-       FROM user_notifications
-       WHERE user_address = ?
-       ORDER BY created_at DESC
-       LIMIT ? OFFSET ?`
-    )
-    .all(address, limit, (page - 1) * limit))
-    .map((row: any) => ({
-      ...row,
-      metadata: row.metadataJson ? JSON.parse(row.metadataJson) : null,
-      metadataJson: undefined,
-    }));
-  res.set("Cache-Control", "private, no-store");
-  res.json({ page, limit, total: Number(total.count), unread: Number(unread.count), records });
 });
 
 router.post("/wallet/:address/notifications/:id/read", async (req: Request, res: Response) => {
@@ -1243,18 +1278,19 @@ router.get("/stats", async (req: Request, res: Response) => {
 
 // ─── GET /discover ────────────────────────────────────────────────────────
 router.get("/discover", async (req: Request, res: Response) => {
-  const addressParam = typeof req.query.address === "string" ? req.query.address.toLowerCase() : "";
-  const address = addressParam && isAddress(addressParam) ? addressParam : "";
-  const db = getDb();
-  const now = Math.floor(Date.now() / 1000);
-  const sevenDaysAgo = now - 7 * 24 * 60 * 60;
-  const todayStart = now - 24 * 60 * 60;
-  const weekStart = Math.floor(Date.UTC(
-    new Date().getUTCFullYear(),
-    new Date().getUTCMonth(),
-    new Date().getUTCDate() - ((new Date().getUTCDay() + 6) % 7),
-    0, 0, 0, 0
-  ) / 1000);
+  try {
+    const addressParam = typeof req.query.address === "string" ? req.query.address.toLowerCase() : "";
+    const address = addressParam && isAddress(addressParam) ? addressParam : "";
+    const db = getDb();
+    const now = Math.floor(Date.now() / 1000);
+    const sevenDaysAgo = now - 7 * 24 * 60 * 60;
+    const todayStart = now - 24 * 60 * 60;
+    const weekStart = Math.floor(Date.UTC(
+      new Date().getUTCFullYear(),
+      new Date().getUTCMonth(),
+      new Date().getUTCDate() - ((new Date().getUTCDay() + 6) % 7),
+      0, 0, 0, 0
+    ) / 1000);
 
   const trendingRows = await db
     .prepare(
@@ -1542,41 +1578,48 @@ router.get("/discover", async (req: Request, res: Response) => {
   const userSupportedAuthorIds = new Set(allUserSupportedCreators.map((creator) => creator.authorId).filter(Boolean));
   const userTrendingConnections = recommendations.filter((creator) => userSupportedAuthorIds.has(creator.authorId) && creator.recentTipCount > 0).length;
 
-  res.set("Cache-Control", "public, max-age=30");
-  res.json({
-    algorithm: {
-      version: "discover-beta-v1",
-      signals: [
-        "recent tips + unique supporters",
-        "unclaimed support + recent activity",
-        "high re-tip activity",
-        "similar to creators you tipped",
-      ],
-    },
-    trendingPosts,
-    recommendedCreators,
-    topCreators,
-    topCreatorsAllTime,
-    unclaimedCreators,
-    tippedBefore,
-    orbit: {
-      connections: userSupportedAuthorIds.size,
-      directTips: tipperStats?.tipCount || 0,
-      unclaimed: allUserSupportedCreators.filter((creator) => creator.claimStatus === "unclaimed").length,
-      trending: userTrendingConnections,
-    },
-  });
+    res.set("Cache-Control", "public, max-age=30");
+    res.json({
+      algorithm: {
+        version: "discover-beta-v1",
+        signals: [
+          "recent tips + unique supporters",
+          "unclaimed support + recent activity",
+          "high re-tip activity",
+          "similar to creators you tipped",
+        ],
+      },
+      trendingPosts,
+      recommendedCreators,
+      topCreators,
+      topCreatorsAllTime,
+      unclaimedCreators,
+      tippedBefore,
+      orbit: {
+        connections: userSupportedAuthorIds.size,
+        directTips: tipperStats?.tipCount || 0,
+        unclaimed: allUserSupportedCreators.filter((creator) => creator.claimStatus === "unclaimed").length,
+        trending: userTrendingConnections,
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[API v1] Discover failed:", message);
+    res.set("Cache-Control", "no-store");
+    res.status(200).json(emptyDiscoverPayload("discover_fetch_failed"));
+  }
 });
 
 // ─── GET /leaderboard/creators ────────────────────────────────────────────
 // ─── GET /discover/search ─────────────────────────────────────────────────────
 router.get("/discover/search", async (req: Request, res: Response) => {
-  const rawQuery = typeof req.query.q === "string" ? req.query.q.trim().replace(/^@/, "").toLowerCase() : "";
-  const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 8, 1), 20);
-  if (rawQuery.length < 2) {
-    res.json({ results: [] });
-    return;
-  }
+  try {
+    const rawQuery = typeof req.query.q === "string" ? req.query.q.trim().replace(/^@/, "").toLowerCase() : "";
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 8, 1), 20);
+    if (rawQuery.length < 2) {
+      res.json({ results: [] });
+      return;
+    }
 
   const db = getDb();
   const sevenDaysAgo = Math.floor(Date.now() / 1000) - 7 * 24 * 60 * 60;
@@ -1667,30 +1710,36 @@ router.get("/discover/search", async (req: Request, res: Response) => {
       latest_handle: string | null;
     }>;
 
-  res.set("Cache-Control", "private, max-age=10");
-  res.json({
-    results: rows.map((row) => {
-      const isVerified = Boolean(row.username);
-      const handle = (row.username || row.latest_handle || "").replace(/^@/, "");
-      return {
-        authorId: row.author_id,
-        username: handle || null,
-        displayName: row.display_name,
-        profileImageUrl: row.profile_image_url,
-        totalReceivedUsd: rawToUsd(row.total),
-        tipCount: Number(row.tip_count),
-        uniqueSupporters: Number(row.unique_supporters),
-        tippedPosts: Number(row.tipped_posts),
-        lastTipAt: row.last_tip_at,
-        lastTipAgo: timeAgoFromUnix(row.last_tip_at),
-        recentTipCount: Number(row.recent_tip_count),
-        isVerified,
-        claimStatus: isVerified ? "verified" : "unclaimed",
-        reason: "Recorded in Teep tip activity",
-        reasonType: "general",
-      };
-    }),
-  });
+    res.set("Cache-Control", "private, max-age=10");
+    res.json({
+      results: rows.map((row) => {
+        const isVerified = Boolean(row.username);
+        const handle = (row.username || row.latest_handle || "").replace(/^@/, "");
+        return {
+          authorId: row.author_id,
+          username: handle || null,
+          displayName: row.display_name,
+          profileImageUrl: row.profile_image_url,
+          totalReceivedUsd: rawToUsd(row.total),
+          tipCount: Number(row.tip_count),
+          uniqueSupporters: Number(row.unique_supporters),
+          tippedPosts: Number(row.tipped_posts),
+          lastTipAt: row.last_tip_at,
+          lastTipAgo: timeAgoFromUnix(row.last_tip_at),
+          recentTipCount: Number(row.recent_tip_count),
+          isVerified,
+          claimStatus: isVerified ? "verified" : "unclaimed",
+          reason: "Recorded in Teep tip activity",
+          reasonType: "general",
+        };
+      }),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[API v1] Discover search failed:", message);
+    res.set("Cache-Control", "private, no-store");
+    res.status(200).json({ results: [], degraded: true });
+  }
 });
 
 router.get("/leaderboard/creators", async (req: Request, res: Response) => {

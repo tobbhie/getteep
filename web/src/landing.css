@@ -400,6 +400,81 @@
   letter-spacing: 0;
 }
 
+.lp-hero-loop {
+  width: min(100%, 610px);
+  min-height: 48px;
+  margin: 22px auto 0;
+  padding: 13px 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid rgba(169, 139, 255, 0.28);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.035);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 18px 60px rgba(0, 0, 0, 0.18);
+  color: #d5c7ff;
+  font-size: 0.9375rem;
+  font-weight: 800;
+}
+
+.lp-hero-loop > svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  color: #a98bff;
+}
+
+.lp-hero-loop-copy {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 1.35em;
+  overflow: hidden;
+  text-align: left;
+}
+
+.lp-hero-loop-copy > span {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(12px);
+  animation: lp-hero-loop 9s ease-in-out infinite;
+  animation-delay: calc(var(--loop-index) * 3s);
+}
+
+.lp-hero-loop-fallback {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@keyframes lp-hero-loop {
+  0%,
+  7% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  12%,
+  31% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  37%,
+  100% {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+}
+
 .lp-hero-actions {
   margin-top: 26px;
   display: flex;
@@ -413,11 +488,56 @@
   padding-inline: 20px;
 }
 
+.lp-hero-extension-note {
+  display: none;
+  margin: 12px 0 0;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.lp-hero-flow-rail {
+  width: min(100%, 520px);
+  min-height: 56px;
+  margin: 22px auto 0;
+  padding: 10px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.875rem;
+  font-weight: 800;
+}
+
+.lp-hero-flow-rail > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.lp-hero-flow-rail svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  color: #a98bff;
+}
+
+.lp-hero-flow-rail > svg {
+  width: 15px;
+  height: 15px;
+  color: rgba(255, 255, 255, 0.36);
+}
+
 .lp-product-stage {
   position: relative;
   width: min(100%, 1060px);
   min-height: 410px;
-  margin: 36px auto 0;
+  margin: 30px auto 0;
   display: grid;
   grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.78fr);
   border: 1px solid #34343c;
@@ -2315,7 +2435,7 @@
   }
 
   .lp-hero {
-    padding: 52px 0 24px;
+    padding: 42px 0 18px;
     overflow: visible;
   }
 
@@ -2332,8 +2452,43 @@
     text-align: center;
   }
 
+  .lp-eyebrow {
+    margin-bottom: 14px;
+  }
+
+  .lp-hero-loop {
+    width: 100%;
+    min-height: 44px;
+    margin-top: 18px;
+    padding: 12px 14px;
+    gap: 10px;
+    font-size: 0.8125rem;
+  }
+
   .lp-hero-actions {
+    margin-top: 18px;
     justify-content: center;
+  }
+
+  .lp-hero-extension-note {
+    display: block;
+  }
+
+  .lp-hero-flow-rail {
+    min-height: 52px;
+    margin-top: 18px;
+    padding: 9px 12px;
+    gap: 9px;
+    font-size: 0.8125rem;
+  }
+
+  .lp-hero-flow-rail > span {
+    gap: 6px;
+  }
+
+  .lp-hero-flow-rail svg {
+    width: 16px;
+    height: 16px;
   }
 
   .lp-section > .lp-container > .lp-kicker,
@@ -2705,6 +2860,25 @@
     font-size: 2.375rem;
   }
 
+  .lp-hero-loop {
+    border-radius: 14px;
+  }
+
+  .lp-hero-flow-rail {
+    justify-content: space-between;
+  }
+
+  .lp-hero-flow-rail > span {
+    flex-direction: column;
+    gap: 5px;
+    line-height: 1;
+  }
+
+  .lp-hero-flow-rail > svg {
+    width: 13px;
+    height: 13px;
+  }
+
   .lp-hero-actions {
     display: grid;
     grid-template-columns: 1fr;
@@ -2785,5 +2959,16 @@
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+
+  .lp-hero-loop-copy > span {
+    display: none;
+    position: static;
+    opacity: 1;
+    transform: none;
+  }
+
+  .lp-hero-loop-copy > span:first-child {
+    display: block;
   }
 }

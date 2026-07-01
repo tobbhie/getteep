@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useCreateWallet, usePrivy, useWallets } from "@privy-io/react-auth";
 import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
@@ -18,6 +18,12 @@ const STATIC_HERO_POST = {
   tweetId: "1969711154847977844",
   url: "https://x.com/pipsandbills/status/1969711154847977844",
 };
+
+const HERO_DECLARATIONS = [
+  "Tip creators directly from social posts.",
+  "Claim tips without crypto stress.",
+  "Let idle tips keep working.",
+];
 
 interface Stats {
   totalTips: number;
@@ -623,11 +629,28 @@ export default function Home() {
           <div className="lp-hero-copy">
             <p className="lp-eyebrow"><Icon name="coin" /> Social finance for creators and communities</p>
             <h1>Tip creators anywhere on the internet.</h1>
+            <div className="lp-hero-loop" aria-label="Tip from posts. Claim instantly. Grow idle tips.">
+              <Icon name="bolt" />
+              <span className="lp-hero-loop-copy" aria-hidden="true">
+                {HERO_DECLARATIONS.map((text, index) => (
+                  <span key={text} style={{ "--loop-index": index } as CSSProperties}>{text}</span>
+                ))}
+              </span>
+              <span className="lp-hero-loop-fallback">Tip from posts. Claim instantly. Grow idle tips.</span>
+            </div>
             <div className="lp-hero-actions">
               <a href="/dashboard" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn--primary"><Icon name="wallet" /> Launch App</a>
               <a href={CHROME_STORE_URL} target={HAS_CHROME_STORE_LISTING ? "_blank" : undefined} rel={HAS_CHROME_STORE_LISTING ? "noopener noreferrer" : undefined} className="lp-btn lp-btn--secondary">
-                <Icon name="puzzle" /> Add to Chrome
+                <Icon name="puzzle" /> Get Extension
               </a>
+            </div>
+            <p className="lp-hero-extension-note">Extension works best on desktop.</p>
+            <div className="lp-hero-flow-rail" aria-label="Post to tip to claim">
+              <span><XLogoIcon /> Post</span>
+              <Icon name="arrowRight" />
+              <span><Icon name="coin" /> Tip</span>
+              <Icon name="arrowRight" />
+              <span><Icon name="wallet" /> Claim</span>
             </div>
           </div>
 
