@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { resolve } from "node:path";
 
 const LOCAL_URL_RE = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i;
 
@@ -28,6 +29,18 @@ export default defineConfig(({ mode }) => {
 
   return {
   plugins: [react()],
+  resolve: {
+    alias: [
+      {
+        find: /^permissionless$/,
+        replacement: resolve(__dirname, "node_modules/permissionless/_esm/index.js"),
+      },
+      {
+        find: /^permissionless\/accounts$/,
+        replacement: resolve(__dirname, "node_modules/permissionless/_esm/accounts/index.js"),
+      },
+    ],
+  },
   server: {
     port: 5174,
     allowedHosts: ["435a-102-88-112-142.ngrok-free.app"],
