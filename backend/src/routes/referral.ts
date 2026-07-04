@@ -20,6 +20,28 @@ const PROTOCOL_TREASURY = (process.env.PROTOCOL_TREASURY_ADDRESS || "").toLowerC
 const REFERRAL_ACTIVATION_MIN_TIPS = parseInt(process.env.REFERRAL_ACTIVATION_MIN_TIPS || "1", 10);
 const REFERRAL_CAP_PER_REFERRER = parseInt(process.env.REFERRAL_CAP_PER_REFERRER || "100", 10);
 const ALLOW_UNSIGNED_REFERRAL_WRITES = process.env.ALLOW_UNSIGNED_REFERRAL_WRITES === "true";
+const CODE_PATTERN = /^[a-z0-9]{4,64}$/;
+const ALLOWED_REFERRAL_LINK_HOSTS = new Set([
+  "getteep.xyz",
+  "www.getteep.xyz",
+  "localhost",
+  "127.0.0.1",
+]);
+
+function normalizeReferralCodeInput(input: string): string {
+  const raw = input.trim();
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw);
+    const host = parsed.hostname.toLowerCase();
+    if (!["http:", "https:"].includes(parsed.protocol) || !ALLOWED_REFERRAL_LINK_HOSTS.has(host)) return "";
+    const ref = parsed.searchParams.get("ref")?.trim().toLowerCase() || "";
+    return CODE_PATTERN.test(ref) ? ref : "";
+  } catch {
+    const code = raw.toLowerCase();
+    return CODE_PATTERN.test(code) ? code : "";
+  }
+}
 
 async function requireWalletProof(req: Request, res: Response, address: unknown, purpose: string): Promise<boolean> {
   if (!isAddress(address)) {
@@ -72,12 +94,16 @@ router.get("/summary/:address", async (req: Request, res: Response) => {
   const statsRow = await db.prepare(
     "SELECT COUNT(*) AS referred_count FROM user_referrals WHERE referrer_address = ?"
   ).get(address) as { referred_count: number } | undefined;
+  const appliedRow = await db.prepare(
+    "SELECT referral_code FROM user_referrals WHERE user_address = ?"
+  ).get(address) as { referral_code: string } | undefined;
 
   res.set("Cache-Control", "private, max-age=30");
   res.json({
     address,
     code: codeRow?.code || null,
     referredCount: Number(statsRow?.referred_count ?? 0),
+    appliedCode: appliedRow?.referral_code || null,
   });
 });
 
@@ -116,10 +142,14 @@ router.post("/link", async (req: Request, res: Response) => {
   }
 
   const user = userAddress.toLowerCase();
-  const codeNorm = code.trim().toLowerCase();
+  const codeNorm = normalizeReferralCodeInput(code);
 
   if (!isAddress(user)) {
     res.status(400).json({ error: "Invalid user address" });
+    return;
+  }
+  if (!codeNorm) {
+    res.status(400).json({ error: "Invalid referral code" });
     return;
   }
   if (!(await requireWalletProof(req, res, user, "referral-link"))) return;

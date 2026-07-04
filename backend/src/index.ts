@@ -147,7 +147,11 @@ assertProductionEnv();
 
 const app = express();
 app.disable("x-powered-by");
-app.set("trust proxy", process.env.TRUST_PROXY === "true" ? 1 : false);
+const trustProxy =
+  process.env.NODE_ENV === "production" || process.env.TRUST_PROXY === "true"
+    ? 1
+    : false;
+app.set("trust proxy", trustProxy);
 
 // Middleware
 app.use(helmet() as any);

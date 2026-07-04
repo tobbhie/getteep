@@ -3,10 +3,19 @@ import { usePrivy } from "@privy-io/react-auth";
 import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
 import { useLocation } from "react-router-dom";
 import { API_BASE, WEB_APP_URL } from "../config";
+import { extractReferralCodeInput } from "../lib/referral";
 
 type ReferralSummary = {
   code: string | null;
+  appliedCode: string | null;
   referredCount: number;
+};
+
+type ApplyReferralResult = {
+  ok: boolean;
+  message: string;
+  code?: string;
+  alreadyLinked?: boolean;
 };
 
 type ReferralContextValue = ReferralSummary & {
@@ -16,7 +25,7 @@ type ReferralContextValue = ReferralSummary & {
   referralUrl: string;
   setStatus: (status: string) => void;
   createCode: () => Promise<string | null>;
-  applyCode: (code: string) => Promise<boolean>;
+  applyCode: (code: string) => Promise<ApplyReferralResult>;
   copyLink: () => Promise<boolean>;
   refresh: () => Promise<void>;
 };
@@ -36,6 +45,7 @@ async function fetchReferralSummary(address: string, force = false): Promise<Ref
       if (!response.ok) throw new Error(data.error || "Could not load referral details.");
       const value = {
         code: data.code ? String(data.code) : null,
+        appliedCode: data.appliedCode ? String(data.appliedCode) : null,
         referredCount: Number(data.referredCount || 0),
       };
       summaryCache.set(address, { value, expiresAt: Date.now() + SUMMARY_TTL_MS });
@@ -56,13 +66,13 @@ export function ReferralProvider({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
   const address = (ready && authenticated ? smartWalletClient?.account?.address || "" : "").toLowerCase();
   const enabled = pathname.startsWith("/dashboard") || pathname.startsWith("/creator");
-  const [summary, setSummary] = useState<ReferralSummary>({ code: null, referredCount: 0 });
+  const [summary, setSummary] = useState<ReferralSummary>({ code: null, appliedCode: null, referredCount: 0 });
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState("");
 
   const refresh = useCallback(async () => {
     if (!address) {
-      setSummary({ code: null, referredCount: 0 });
+      setSummary({ code: null, appliedCode: null, referredCount: 0 });
       return;
     }
     setLoading(true);
@@ -79,7 +89,7 @@ export function ReferralProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     if (!enabled) return;
     if (!address) {
-      setSummary({ code: null, referredCount: 0 });
+      setSummary({ code: null, appliedCode: null, referredCount: 0 });
       return;
     }
     setLoading(true);
@@ -142,10 +152,13 @@ export function ReferralProvider({ children }: { children: ReactNode }) {
   }, [address, requestWalletProof, summary]);
 
   const applyCode = useCallback(async (rawCode: string) => {
-    const code = rawCode.trim().toLowerCase();
-    if (!address || !code) return false;
+    const code = extractReferralCodeInput(rawCode);
+    if (!address) return { ok: false, message: "Connect your account first." };
+    if (!code) return { ok: false, message: "Enter a valid Teep referral code or referral link." };
+    if (summary.appliedCode) {
+      return { ok: true, message: "Referral already linked.", code: summary.appliedCode, alreadyLinked: true };
+    }
     setLoading(true);
-    setStatus("");
     try {
       const walletProof = await requestWalletProof("referral-link");
       const response = await fetch(`${API_BASE}/referral/link`, {
@@ -155,16 +168,19 @@ export function ReferralProvider({ children }: { children: ReactNode }) {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "Could not apply referral code.");
-      setStatus(data.alreadyLinked ? "Referral already linked." : "Referral code applied.");
       await refresh();
-      return true;
+      return {
+        ok: true,
+        message: data.alreadyLinked ? "Referral already linked." : "Referral code applied.",
+        code,
+        alreadyLinked: Boolean(data.alreadyLinked),
+      };
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Could not apply referral code.");
-      return false;
+      return { ok: false, message: error instanceof Error ? error.message : "Could not apply referral code." };
     } finally {
       setLoading(false);
     }
-  }, [address, refresh, requestWalletProof]);
+  }, [address, refresh, requestWalletProof, summary.appliedCode]);
 
   const referralUrl = summary.code
     ? `${WEB_APP_URL || window.location.origin}/?ref=${encodeURIComponent(summary.code)}`
@@ -187,6 +203,7 @@ export function ReferralProvider({ children }: { children: ReactNode }) {
   const value = useMemo<ReferralContextValue>(() => ({
     address,
     code: summary.code,
+    appliedCode: summary.appliedCode,
     referredCount: summary.referredCount,
     loading,
     status,

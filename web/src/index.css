@@ -5666,6 +5666,28 @@ body:has(.dashboard-layout),
 .dashboard-referral-apply-row input::placeholder {
   color: var(--text-muted);
 }
+.dashboard-referral-apply-row input:disabled,
+.dashboard-referral-apply-row input[readonly] {
+  border-color: rgba(99, 36, 235, 0.35);
+  background: rgba(99, 36, 235, 0.1);
+  color: var(--text-primary);
+  opacity: 1;
+}
+.dashboard-referral-apply-message {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-small);
+  font-weight: 750;
+  line-height: 1.4;
+}
+.dashboard-referral-apply-message.is-success {
+  color: #22c55e;
+}
+.dashboard-referral-apply-message.is-error {
+  color: #f43f5e;
+}
+.dashboard-referral-apply-message.is-info {
+  color: #a98bff;
+}
 .dashboard-referral-stat strong {
   display: block;
   color: var(--text-primary);
@@ -6688,9 +6710,15 @@ body:has(.dashboard-layout),
   }
   .dashboard-settings-menu {
     position: static;
-    padding-right: 36px;
-    mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 34px), transparent 100%);
-    -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 34px), transparent 100%);
+    width: calc(100% + 20px);
+    max-width: calc(100% + 20px);
+    margin-right: -20px;
+    padding-right: 56px;
+    mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 72px), rgba(0, 0, 0, 0.45) calc(100% - 38px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 72px), rgba(0, 0, 0, 0.45) calc(100% - 38px), transparent 100%);
+  }
+  .dashboard-settings-menu button {
+    min-width: max-content;
   }
   .dashboard-settings-panel-head,
   .dashboard-settings-list-row,

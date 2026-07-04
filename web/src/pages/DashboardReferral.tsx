@@ -6,12 +6,17 @@ import { useReferral } from "../context/ReferralContext";
 
 export default function DashboardReferral() {
   const { ready, authenticated } = usePrivy();
-  const { address, code, referredCount, status, loading, referralUrl, createCode, copyLink, applyCode } = useReferral();
+  const { address, code, appliedCode, referredCount, status, loading, referralUrl, createCode, copyLink, applyCode } = useReferral();
   const [manualCode, setManualCode] = useState("");
+  const [applyMessage, setApplyMessage] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
 
   const handleApplyCode = async () => {
-    const applied = await applyCode(manualCode);
-    if (applied) setManualCode("");
+    const result = await applyCode(manualCode);
+    setApplyMessage({
+      type: result.ok ? (result.alreadyLinked ? "info" : "success") : "error",
+      text: result.message,
+    });
+    if (result.ok) setManualCode("");
   };
 
   if (!ready) {
@@ -68,20 +73,27 @@ export default function DashboardReferral() {
 
             <section className="dashboard-metric-card dashboard-referral-manual">
               <div className="dashboard-metric-label">Have a Referral Code?</div>
-              <h3>Apply a code</h3>
+              <h3>{appliedCode ? "Referral linked" : "Apply a code"}</h3>
               <div className="dashboard-referral-apply-row">
                 <input
-                  value={manualCode}
+                  value={appliedCode || manualCode}
                   onChange={(event) => setManualCode(event.target.value)}
-                  placeholder="Enter referral code"
+                  placeholder="Enter referral code or Teep referral link"
                   autoCapitalize="none"
                   spellCheck={false}
+                  disabled={Boolean(appliedCode)}
+                  readOnly={Boolean(appliedCode)}
                 />
-                <button type="button" className="btn-primary" onClick={handleApplyCode} disabled={loading || !manualCode.trim()}>
-                  Apply
-                </button>
+                {!appliedCode && (
+                  <button type="button" className="btn-primary" onClick={handleApplyCode} disabled={loading || !manualCode.trim()}>
+                    Apply
+                  </button>
+                )}
               </div>
-              <p className="dashboard-settings-muted">Use this if someone sent you a code instead of a link.</p>
+              {applyMessage && <p className={`dashboard-referral-apply-message is-${applyMessage.type}`}>{applyMessage.text}</p>}
+              <p className="dashboard-settings-muted">
+                {appliedCode ? "This account is already linked to a referral code." : "Paste a referral code or a full Teep referral link."}
+              </p>
             </section>
 
             <section className="dashboard-metric-card dashboard-referral-economics">

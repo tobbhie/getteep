@@ -31,17 +31,68 @@ function creatorTipPredicate(alias = "t"): string {
   return `(${alias}.author_id = ? OR LOWER(COALESCE(m.author_handle, '')) = LOWER(?))`;
 }
 
-// Temporary in-memory state for OAuth flows (short-lived, CSRF protection only)
-const pendingOAuthFlows = new Map<
-  string,
-  {
-    ownerAddress: string;
-    codeVerifier: string;
-    expiresAt: number;
-    mode: "claim" | "refresh_profile" | "x_tipping";
-    expectedAuthorId?: string;
+type OAuthFlowMode = "claim" | "refresh_profile" | "x_tipping";
+type PendingOAuthFlow = {
+  ownerAddress: string;
+  codeVerifier: string;
+  expiresAt: number;
+  mode: OAuthFlowMode;
+  expectedAuthorId?: string;
+};
+
+async function storeOAuthFlow(state: string, flow: PendingOAuthFlow) {
+  await getDb().prepare(
+    `INSERT INTO oauth_flows (state, owner_address, code_verifier, mode, expected_author_id, expires_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(state) DO UPDATE SET
+       owner_address = excluded.owner_address,
+       code_verifier = excluded.code_verifier,
+       mode = excluded.mode,
+       expected_author_id = excluded.expected_author_id,
+       expires_at = excluded.expires_at,
+       created_at = excluded.created_at`
+  ).run(
+    state,
+    flow.ownerAddress.toLowerCase(),
+    flow.codeVerifier,
+    flow.mode,
+    flow.expectedAuthorId ?? null,
+    flow.expiresAt,
+    Date.now(),
+  );
+}
+
+async function getOAuthFlow(state: string): Promise<PendingOAuthFlow | null> {
+  const row = await getDb().prepare(
+    "SELECT owner_address, code_verifier, mode, expected_author_id, expires_at FROM oauth_flows WHERE state = ?"
+  ).get(state) as {
+    owner_address: string;
+    code_verifier: string;
+    mode: OAuthFlowMode;
+    expected_author_id: string | null;
+    expires_at: number | string;
+  } | undefined;
+  if (!row) return null;
+  return {
+    ownerAddress: row.owner_address,
+    codeVerifier: row.code_verifier,
+    mode: row.mode,
+    expectedAuthorId: row.expected_author_id || undefined,
+    expiresAt: Number(row.expires_at),
+  };
+}
+
+async function deleteOAuthFlow(state: string) {
+  await getDb().prepare("DELETE FROM oauth_flows WHERE state = ?").run(state);
+}
+
+async function pruneOAuthFlows() {
+  try {
+    await getDb().prepare("DELETE FROM oauth_flows WHERE expires_at < ?").run(Date.now());
+  } catch {
+    /* Database may not be initialized during module load; next auth request will prune. */
   }
->();
+}
 
 function createPkcePair(): { codeVerifier: string; codeChallenge: string } {
   const codeVerifier = crypto.randomBytes(32).toString("base64url");
@@ -53,17 +104,14 @@ function createPkcePair(): { codeVerifier: string; codeChallenge: string } {
 }
 
 setInterval(() => {
-  const now = Date.now();
-  for (const [key, val] of pendingOAuthFlows) {
-    if (val.expiresAt < now) pendingOAuthFlows.delete(key);
-  }
+  void pruneOAuthFlows();
 }, 60_000);
 
 /**
  * POST /auth/x/start
  * Initiates X OAuth flow for wallet claiming.
  */
-router.post("/x/start", (req: Request, res: Response) => {
+router.post("/x/start", async (req: Request, res: Response) => {
   const { ownerAddress } = req.body;
 
   if (!isAddress(ownerAddress)) {
@@ -74,7 +122,7 @@ router.post("/x/start", (req: Request, res: Response) => {
   const state = crypto.randomBytes(32).toString("hex");
   const { codeVerifier, codeChallenge } = createPkcePair();
 
-  pendingOAuthFlows.set(state, {
+  await storeOAuthFlow(state, {
     ownerAddress: ownerAddress.toLowerCase(),
     codeVerifier,
     expiresAt: Date.now() + 10 * 60 * 1000,
@@ -116,7 +164,7 @@ router.post("/x/refresh-profile/start", async (req: Request, res: Response) => {
   const state = crypto.randomBytes(32).toString("hex");
   const { codeVerifier, codeChallenge } = createPkcePair();
 
-  pendingOAuthFlows.set(state, {
+  await storeOAuthFlow(state, {
     ownerAddress,
     codeVerifier,
     expiresAt: Date.now() + 10 * 60 * 1000,
@@ -132,7 +180,7 @@ router.post("/x/refresh-profile/start", async (req: Request, res: Response) => {
  * POST /auth/x/tipping/start
  * Links an X account to a wallet for X bot tipping (Mode A).
  */
-router.post("/x/tipping/start", (req: Request, res: Response) => {
+router.post("/x/tipping/start", async (req: Request, res: Response) => {
   const { ownerAddress } = req.body;
 
   if (!isAddress(ownerAddress)) {
@@ -143,7 +191,7 @@ router.post("/x/tipping/start", (req: Request, res: Response) => {
   const state = crypto.randomBytes(32).toString("hex");
   const { codeVerifier, codeChallenge } = createPkcePair();
 
-  pendingOAuthFlows.set(state, {
+  await storeOAuthFlow(state, {
     ownerAddress: ownerAddress.toLowerCase(),
     codeVerifier,
     expiresAt: Date.now() + 10 * 60 * 1000,
@@ -181,14 +229,14 @@ router.get("/x/callback", async (req: Request, res: Response) => {
     return;
   }
 
-  const flow = pendingOAuthFlows.get(state);
+  const flow = await getOAuthFlow(state);
   if (!flow) {
     res.status(400).json({ error: "Invalid or expired state" });
     return;
   }
 
   if (flow.expiresAt < Date.now()) {
-    pendingOAuthFlows.delete(state);
+    await deleteOAuthFlow(state);
     res.status(400).json({ error: "OAuth flow expired" });
     return;
   }
@@ -196,7 +244,7 @@ router.get("/x/callback", async (req: Request, res: Response) => {
   try {
     // 1. Verify with X and get profile
     const profile = await oauthService.verifyAndGetProfile(code, flow.codeVerifier);
-    pendingOAuthFlows.delete(state);
+    await deleteOAuthFlow(state);
 
     // 2. Use X's stable numeric user ID for on-chain author identity.
     const authorId = authorIdFromXUserId(profile.id);

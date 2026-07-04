@@ -5,6 +5,21 @@ export function normalizeReferralCode(value: string | null | undefined): string 
   return /^[a-z0-9]{4,64}$/.test(code) ? code : "";
 }
 
+export function extractReferralCodeInput(value: string): string {
+  const raw = value.trim();
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw);
+    const host = parsed.hostname.toLowerCase();
+    const currentHost = window.location.hostname.toLowerCase();
+    const allowedHosts = new Set(["getteep.xyz", "www.getteep.xyz", "localhost", "127.0.0.1", currentHost]);
+    if (!["http:", "https:"].includes(parsed.protocol) || !allowedHosts.has(host)) return "";
+    return normalizeReferralCode(parsed.searchParams.get("ref"));
+  } catch {
+    return normalizeReferralCode(raw);
+  }
+}
+
 export function referralAppliedKey(code: string, address: string): string {
   return `teep_ref_applied_${code}_${address.toLowerCase()}`;
 }

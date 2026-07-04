@@ -382,6 +382,18 @@ const schemaSql = `
   CREATE INDEX IF NOT EXISTS idx_security_events_actor_created ON security_events(actor_address, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_security_events_type_created ON security_events(event_type, created_at DESC);
 
+  CREATE TABLE IF NOT EXISTS oauth_flows (
+    state TEXT PRIMARY KEY,
+    owner_address TEXT NOT NULL,
+    code_verifier TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    expected_author_id TEXT,
+    expires_at BIGINT NOT NULL,
+    created_at BIGINT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_oauth_flows_expires ON oauth_flows(expires_at);
+
   CREATE TABLE IF NOT EXISTS funding_provider_sessions (
     id TEXT PRIMARY KEY,
     provider TEXT NOT NULL,
