@@ -11,7 +11,7 @@ const PAGE_SIZE = 7;
 
 type SettingsTab = "identity" | "tipping" | "receipts" | "funding" | "grow" | "notifications" | "privacy" | "engagement" | "support";
 
-const SETTINGS_TABS: SettingsTab[] = ["identity", "tipping", "receipts", "funding", "grow", "notifications", "privacy", "engagement", "support"];
+const SETTINGS_TABS: SettingsTab[] = ["identity", "funding", "tipping", "receipts", "grow", "notifications", "privacy", "engagement", "support"];
 
 function isSettingsTab(value: string | null): value is SettingsTab {
   return SETTINGS_TABS.includes(value as SettingsTab);
@@ -660,9 +660,9 @@ export default function DashboardSettings() {
 
   const allTabs = [
     { id: "identity", icon: "badge", label: "Identity", detail: "Username and account" },
+    { id: "funding", icon: "account_balance_wallet", label: isCreatorSettings ? "Payouts" : "Funding", detail: isCreatorSettings ? "Destination and history" : "Funding and withdrawals" },
     { id: "tipping", icon: "payments", label: "Tipping", detail: "Extension default" },
     { id: "receipts", icon: "receipt_long", label: "Receipts", detail: "Sharing and exports" },
-    { id: "funding", icon: "account_balance_wallet", label: isCreatorSettings ? "Payouts" : "Funding", detail: isCreatorSettings ? "Destination and history" : "Funding and withdrawals" },
     { id: "grow", icon: "psychiatry", label: "Grow Tips", detail: "Strategy preferences" },
     { id: "notifications", icon: "notifications", label: "Notifications", detail: "Account alerts" },
     { id: "privacy", icon: "shield", label: "Privacy", detail: "Visibility and safety" },

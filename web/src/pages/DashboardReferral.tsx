@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import DashboardShell from "../components/DashboardShell";
 import { DashboardConnectPage, DashboardPreparingPage } from "../components/DashboardAuthState";
@@ -5,7 +6,13 @@ import { useReferral } from "../context/ReferralContext";
 
 export default function DashboardReferral() {
   const { ready, authenticated } = usePrivy();
-  const { address, code, referredCount, status, loading, referralUrl, createCode, copyLink } = useReferral();
+  const { address, code, referredCount, status, loading, referralUrl, createCode, copyLink, applyCode } = useReferral();
+  const [manualCode, setManualCode] = useState("");
+
+  const handleApplyCode = async () => {
+    const applied = await applyCode(manualCode);
+    if (applied) setManualCode("");
+  };
 
   if (!ready) {
     return <DashboardPreparingPage title="Referrals" />;
@@ -48,6 +55,35 @@ export default function DashboardReferral() {
               {status && <p className="dashboard-settings-status">{status}</p>}
             </section>
 
+            <section className="dashboard-metric-card">
+              <div className="dashboard-metric-label">Referral Stats</div>
+              <div className="dashboard-referral-stat">
+                <strong>{address ? referredCount : <span className="dashboard-inline-skeleton" />}</strong>
+                <span>Linked accounts</span>
+              </div>
+              <p className="dashboard-settings-muted">
+                Referral earnings are credited when a referred user becomes eligible and performs a fee-bearing withdrawal.
+              </p>
+            </section>
+
+            <section className="dashboard-metric-card dashboard-referral-manual">
+              <div className="dashboard-metric-label">Have a Referral Code?</div>
+              <h3>Apply a code</h3>
+              <div className="dashboard-referral-apply-row">
+                <input
+                  value={manualCode}
+                  onChange={(event) => setManualCode(event.target.value)}
+                  placeholder="Enter referral code"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                />
+                <button type="button" className="btn-primary" onClick={handleApplyCode} disabled={loading || !manualCode.trim()}>
+                  Apply
+                </button>
+              </div>
+              <p className="dashboard-settings-muted">Use this if someone sent you a code instead of a link.</p>
+            </section>
+
             <section className="dashboard-metric-card dashboard-referral-economics">
               <div className="dashboard-metric-label">Fee Split</div>
               <div className="dashboard-referral-split">
@@ -66,17 +102,6 @@ export default function DashboardReferral() {
               </div>
               <p className="dashboard-settings-muted">
                 Referral rewards are only calculated on eligible creator earned-tip withdrawals, not when a normal tip is sent.
-              </p>
-            </section>
-
-            <section className="dashboard-metric-card">
-              <div className="dashboard-metric-label">Referral Stats</div>
-              <div className="dashboard-referral-stat">
-                <strong>{address ? referredCount : <span className="dashboard-inline-skeleton" />}</strong>
-                <span>Linked accounts</span>
-              </div>
-              <p className="dashboard-settings-muted">
-                Referral earnings are credited when a referred user becomes eligible and performs a fee-bearing withdrawal.
               </p>
             </section>
 

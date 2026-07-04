@@ -16,6 +16,7 @@ type ReferralContextValue = ReferralSummary & {
   referralUrl: string;
   setStatus: (status: string) => void;
   createCode: () => Promise<string | null>;
+  applyCode: (code: string) => Promise<boolean>;
   copyLink: () => Promise<boolean>;
   refresh: () => Promise<void>;
 };
@@ -97,12 +98,12 @@ export function ReferralProvider({ children }: { children: ReactNode }) {
     };
   }, [address, enabled]);
 
-  const requestWalletProof = useCallback(async () => {
+  const requestWalletProof = useCallback(async (purpose: "referral-code" | "referral-link" = "referral-code") => {
     if (!address || !smartWalletClient?.account) throw new Error("Connect your account first.");
     const challengeRes = await fetch(`${API_BASE}/auth/wallet/challenge`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ address, purpose: "referral-code" }),
+      body: JSON.stringify({ address, purpose }),
     });
     const challenge = await challengeRes.json();
     if (!challengeRes.ok || !challenge.message) throw new Error(challenge.error || "Could not verify account.");
@@ -118,7 +119,7 @@ export function ReferralProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     setStatus("");
     try {
-      const walletProof = await requestWalletProof();
+      const walletProof = await requestWalletProof("referral-code");
       const response = await fetch(`${API_BASE}/referral/code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -139,6 +140,31 @@ export function ReferralProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     }
   }, [address, requestWalletProof, summary]);
+
+  const applyCode = useCallback(async (rawCode: string) => {
+    const code = rawCode.trim().toLowerCase();
+    if (!address || !code) return false;
+    setLoading(true);
+    setStatus("");
+    try {
+      const walletProof = await requestWalletProof("referral-link");
+      const response = await fetch(`${API_BASE}/referral/link`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userAddress: address, code, walletProof }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Could not apply referral code.");
+      setStatus(data.alreadyLinked ? "Referral already linked." : "Referral code applied.");
+      await refresh();
+      return true;
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Could not apply referral code.");
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }, [address, refresh, requestWalletProof]);
 
   const referralUrl = summary.code
     ? `${WEB_APP_URL || window.location.origin}/?ref=${encodeURIComponent(summary.code)}`
@@ -167,9 +193,10 @@ export function ReferralProvider({ children }: { children: ReactNode }) {
     referralUrl,
     setStatus,
     createCode,
+    applyCode,
     copyLink,
     refresh,
-  }), [address, summary, loading, status, referralUrl, createCode, copyLink, refresh]);
+  }), [address, summary, loading, status, referralUrl, createCode, applyCode, copyLink, refresh]);
 
   return <ReferralContext.Provider value={value}>{children}</ReferralContext.Provider>;
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate, Routes, Route, useParams, useSearchParams } from "react-router-dom";
+import { Navigate, Routes, Route, useLocation, useParams, useSearchParams } from "react-router-dom";
 import Layout from "./Layout";
 import Home from "./pages/Home";
 import TipPost from "./pages/TipPost";
@@ -26,6 +26,7 @@ import TxReceipt from "./pages/TxReceipt";
 import { useAccountRole } from "./context/AccountRoleContext";
 import { DashboardPreparingPage } from "./components/DashboardAuthState";
 import { API_BASE } from "./config";
+import { normalizeReferralCode, storePendingReferralCode } from "./lib/referral";
 
 const RESERVED_TOP_LEVEL_ROUTES = new Set([
   "api",
@@ -128,6 +129,13 @@ function LegacyTopLevelCreatorRedirect() {
 }
 
 export default function App() {
+  const location = useLocation();
+
+  useEffect(() => {
+    const code = normalizeReferralCode(new URLSearchParams(location.search).get("ref"));
+    if (code) storePendingReferralCode(code);
+  }, [location.search]);
+
   return (
     <Layout>
       <Routes>

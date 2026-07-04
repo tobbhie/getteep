@@ -15,6 +15,13 @@ import CreatorClaimPrompt from "../components/dashboard/CreatorClaimPrompt";
 import TeepTipModal from "../components/TeepTipModal";
 import { useAccountRole } from "../context/AccountRoleContext";
 import {
+  clearPendingReferralCode,
+  normalizeReferralCode,
+  readPendingReferralCode,
+  referralAppliedKey,
+  referralAttemptKey,
+} from "../lib/referral";
+import {
   API_BASE,
   ENABLE_FIAT_OFFRAMP,
   ENABLE_FIAT_ONRAMP,
@@ -1067,8 +1074,13 @@ export default function Dashboard({ mode = "auto" }: { mode?: DashboardMode }) {
   useEffect(() => {
     if (!address || !smartWalletClient?.account) return;
     const params = new URLSearchParams(window.location.search);
-    const code = params.get("ref")?.trim().toLowerCase();
-    if (!code || sessionStorage.getItem(`teep_ref_applied_${code}_${address}`)) return;
+    const code = normalizeReferralCode(params.get("ref")) || readPendingReferralCode();
+    if (!code) return;
+
+    const appliedKey = referralAppliedKey(code, address);
+    const attemptKey = referralAttemptKey(code, address);
+    if (sessionStorage.getItem(appliedKey) || sessionStorage.getItem(attemptKey)) return;
+    sessionStorage.setItem(attemptKey, "1");
 
     let cancelled = false;
     const applyReferral = async () => {
@@ -1082,12 +1094,17 @@ export default function Dashboard({ mode = "auto" }: { mode?: DashboardMode }) {
         });
         const data = await response.json();
         if (response.ok) {
-          sessionStorage.setItem(`teep_ref_applied_${code}_${address}`, "1");
+          sessionStorage.setItem(appliedKey, "1");
+          clearPendingReferralCode(code);
         } else if (data?.error) {
           console.info("[Referral] Could not apply referral link:", data.error);
+          if (response.status === 400 || response.status === 404) {
+            clearPendingReferralCode(code);
+          }
         }
       } catch {
         // Keep this quiet; referral links should never block dashboard use.
+        sessionStorage.removeItem(attemptKey);
       }
     };
     applyReferral();
