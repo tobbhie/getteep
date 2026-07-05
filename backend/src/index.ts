@@ -110,6 +110,25 @@ function assertProductionEnv() {
       throw new Error(`Production backend cannot use a localhost ${key}.`);
     }
   }
+  if (!process.env.X_REDIRECT_URI) {
+    throw new Error("Production backend requires X_REDIRECT_URI.");
+  }
+  try {
+    const redirectUrl = new URL(process.env.X_REDIRECT_URI);
+    const webUrl = new URL(process.env.WEB_APP_URL!);
+    if (redirectUrl.protocol !== "https:") {
+      throw new Error("Production X_REDIRECT_URI must use https.");
+    }
+    if (redirectUrl.origin === webUrl.origin) {
+      throw new Error("Production X_REDIRECT_URI must point to the backend/API origin, not the web frontend origin.");
+    }
+    if (redirectUrl.pathname !== "/auth/x/callback") {
+      throw new Error("Production X_REDIRECT_URI must end with /auth/x/callback.");
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "invalid URL";
+    throw new Error(`Production backend has an invalid X_REDIRECT_URI: ${message}`);
+  }
   if (process.env.ENABLE_FAUCET === "true") {
     throw new Error("Production backend cannot enable ENABLE_FAUCET.");
   }

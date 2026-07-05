@@ -73,6 +73,21 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, __dirname, "");
   if (mode === "production") assertProductionEnv(env);
   const allowedHosts = collectAllowedHosts(env);
+  const devProxyTarget = env.VITE_DEV_PROXY_TARGET || env.VITE_API_URL || "http://127.0.0.1:3001";
+  const apiProxyRoutes = [
+    "/api/ops",
+    "/api",
+    "/auth",
+    "/defi",
+    "/faucet",
+    "/health",
+    "/leaderboard",
+    "/milestones",
+    "/referral",
+    "/stats",
+    "/tips",
+    "/withdrawal",
+  ];
 
   return {
   plugins: [react()],
@@ -95,20 +110,7 @@ export default defineConfig(({ mode }) => {
   server: {
     port: 5174,
     allowedHosts,
-    proxy: {
-      "/api": "http://127.0.0.1:3001",
-      "/auth": "http://127.0.0.1:3001",
-      "/defi": "http://127.0.0.1:3001",
-      "/faucet": "http://127.0.0.1:3001",
-      "/health": "http://127.0.0.1:3001",
-      "/leaderboard": "http://127.0.0.1:3001",
-      "/milestones": "http://127.0.0.1:3001",
-      "/api/ops": "http://127.0.0.1:3001",
-      "/referral": "http://127.0.0.1:3001",
-      "/stats": "http://127.0.0.1:3001",
-      "/tips": "http://127.0.0.1:3001",
-      "/withdrawal": "http://127.0.0.1:3001",
-    },
+    proxy: Object.fromEntries(apiProxyRoutes.map((route) => [route, devProxyTarget])),
   },
   preview: {
     allowedHosts,

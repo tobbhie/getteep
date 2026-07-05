@@ -388,6 +388,7 @@ const schemaSql = `
     code_verifier TEXT NOT NULL,
     mode TEXT NOT NULL,
     expected_author_id TEXT,
+    return_to TEXT,
     expires_at BIGINT NOT NULL,
     created_at BIGINT NOT NULL
   );

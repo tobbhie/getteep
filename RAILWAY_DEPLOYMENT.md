@@ -151,12 +151,28 @@ limits are confirmed for the bot account.
 ## Provider Callback URLs
 
 After Railway gives each service a domain, update providers to use the exact
-domains.
+domains. The X OAuth callback belongs to the backend/API service, not the web
+frontend service. Do not set X's callback URL to `https://getteep.xyz/auth/x/callback`
+unless `getteep.xyz` is the backend service itself.
 
 X OAuth:
 
 ```text
 https://YOUR_BACKEND_DOMAIN/auth/x/callback
+```
+
+Recommended custom-domain shape:
+
+```text
+https://getteep.xyz      -> web frontend
+https://api.getteep.xyz  -> backend API
+```
+
+With that setup, X Developer Portal callback URL and backend `X_REDIRECT_URI`
+should both be:
+
+```text
+https://api.getteep.xyz/auth/x/callback
 ```
 
 Privy:

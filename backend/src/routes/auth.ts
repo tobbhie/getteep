@@ -38,17 +38,39 @@ type PendingOAuthFlow = {
   expiresAt: number;
   mode: OAuthFlowMode;
   expectedAuthorId?: string;
+  returnTo?: string;
 };
+
+function appUrl(path = "/dashboard"): string {
+  const base = (process.env.WEB_APP_URL || process.env.RECEIPT_BASE_URL || "https://getteep.xyz").replace(/\/$/, "");
+  return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+function safeReturnTo(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+
+  const base = new URL(appUrl("/"));
+  try {
+    const parsed = value.startsWith("/")
+      ? new URL(value, base)
+      : new URL(value);
+    if (parsed.origin !== base.origin) return undefined;
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
+}
 
 async function storeOAuthFlow(state: string, flow: PendingOAuthFlow) {
   await getDb().prepare(
-    `INSERT INTO oauth_flows (state, owner_address, code_verifier, mode, expected_author_id, expires_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO oauth_flows (state, owner_address, code_verifier, mode, expected_author_id, return_to, expires_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(state) DO UPDATE SET
        owner_address = excluded.owner_address,
        code_verifier = excluded.code_verifier,
        mode = excluded.mode,
        expected_author_id = excluded.expected_author_id,
+       return_to = excluded.return_to,
        expires_at = excluded.expires_at,
        created_at = excluded.created_at`
   ).run(
@@ -57,6 +79,7 @@ async function storeOAuthFlow(state: string, flow: PendingOAuthFlow) {
     flow.codeVerifier,
     flow.mode,
     flow.expectedAuthorId ?? null,
+    flow.returnTo ?? null,
     flow.expiresAt,
     Date.now(),
   );
@@ -64,12 +87,13 @@ async function storeOAuthFlow(state: string, flow: PendingOAuthFlow) {
 
 async function getOAuthFlow(state: string): Promise<PendingOAuthFlow | null> {
   const row = await getDb().prepare(
-    "SELECT owner_address, code_verifier, mode, expected_author_id, expires_at FROM oauth_flows WHERE state = ?"
+    "SELECT owner_address, code_verifier, mode, expected_author_id, return_to, expires_at FROM oauth_flows WHERE state = ?"
   ).get(state) as {
     owner_address: string;
     code_verifier: string;
     mode: OAuthFlowMode;
     expected_author_id: string | null;
+    return_to: string | null;
     expires_at: number | string;
   } | undefined;
   if (!row) return null;
@@ -78,6 +102,7 @@ async function getOAuthFlow(state: string): Promise<PendingOAuthFlow | null> {
     codeVerifier: row.code_verifier,
     mode: row.mode,
     expectedAuthorId: row.expected_author_id || undefined,
+    returnTo: row.return_to || undefined,
     expiresAt: Number(row.expires_at),
   };
 }
@@ -113,6 +138,7 @@ setInterval(() => {
  */
 router.post("/x/start", async (req: Request, res: Response) => {
   const { ownerAddress } = req.body;
+  const returnTo = safeReturnTo(req.body?.returnTo);
 
   if (!isAddress(ownerAddress)) {
     res.status(400).json({ error: "Valid ownerAddress is required" });
@@ -127,6 +153,7 @@ router.post("/x/start", async (req: Request, res: Response) => {
     codeVerifier,
     expiresAt: Date.now() + 10 * 60 * 1000,
     mode: "claim",
+    returnTo,
   });
 
   const authUrl = oauthService.getAuthUrl(state, codeChallenge);
@@ -141,6 +168,7 @@ router.post("/x/start", async (req: Request, res: Response) => {
 router.post("/x/refresh-profile/start", async (req: Request, res: Response) => {
   const ownerAddress = String(req.body?.ownerAddress || "").toLowerCase();
   const requestedAuthorId = typeof req.body?.authorId === "string" ? req.body.authorId.trim() : "";
+  const returnTo = safeReturnTo(req.body?.returnTo);
 
   if (!isAddress(ownerAddress)) {
     res.status(400).json({ error: "Valid ownerAddress is required" });
@@ -170,6 +198,7 @@ router.post("/x/refresh-profile/start", async (req: Request, res: Response) => {
     expiresAt: Date.now() + 10 * 60 * 1000,
     mode: "refresh_profile",
     expectedAuthorId: claim.author_id,
+    returnTo,
   });
 
   const authUrl = oauthService.getAuthUrl(state, codeChallenge);
@@ -182,6 +211,7 @@ router.post("/x/refresh-profile/start", async (req: Request, res: Response) => {
  */
 router.post("/x/tipping/start", async (req: Request, res: Response) => {
   const { ownerAddress } = req.body;
+  const returnTo = safeReturnTo(req.body?.returnTo);
 
   if (!isAddress(ownerAddress)) {
     res.status(400).json({ error: "Valid ownerAddress is required" });
@@ -196,6 +226,7 @@ router.post("/x/tipping/start", async (req: Request, res: Response) => {
     codeVerifier,
     expiresAt: Date.now() + 10 * 60 * 1000,
     mode: "x_tipping",
+    returnTo,
   });
 
   const authUrl = oauthService.getAuthUrl(state, codeChallenge);
@@ -314,11 +345,13 @@ router.get("/x/callback", async (req: Request, res: Response) => {
   h1 { font-size: 24px; color: #00ba7c; margin-bottom: 8px; }
   p { color: #71767b; font-size: 14px; line-height: 1.5; }
   .handle { color: #1d9bf0; font-weight: 700; }
+  .button { display: inline-flex; align-items: center; justify-content: center; margin-top: 18px; padding: 12px 18px; border-radius: 12px; background: #6d28d9; color: #fff; font-weight: 800; text-decoration: none; }
 </style></head><body>
 <div class="card">
   <h1>X account linked</h1>
   <p><span class="handle">@${escapeHtml(profile.username)}</span> is linked for Teep X tipping.</p>
   <p>Fund your Teep balance and enable X tipping in dashboard settings.</p>
+  ${flow.returnTo ? `<a class="button" href="${escapeHtml(flow.returnTo)}">Return to Teep</a>` : ""}
 </div>
 </body></html>`);
       return;
@@ -370,12 +403,13 @@ router.get("/x/callback", async (req: Request, res: Response) => {
   p { color: #71767b; font-size: 14px; line-height: 1.5; }
   .handle { color: #1d9bf0; font-weight: 700; }
   .hint { margin-top: 20px; font-size: 12px; color: #536471; }
+  .button { display: inline-flex; align-items: center; justify-content: center; margin-top: 18px; padding: 12px 18px; border-radius: 12px; background: #6d28d9; color: #fff; font-weight: 800; text-decoration: none; }
 </style></head><body>
 <div class="card">
   <h1>Profile refreshed</h1>
   <p>Teep updated your creator profile to <span class="handle">@${escapeHtml(profile.username)}</span>.</p>
   <p>Your tip wallet and creator account stayed the same.</p>
-  <p class="hint">You can return to Teep now.</p>
+  ${flow.returnTo ? `<a class="button" href="${escapeHtml(flow.returnTo)}">Return to Teep</a>` : `<p class="hint">You can return to Teep now.</p>`}
 </div>
 </body></html>`);
       return;
@@ -463,12 +497,13 @@ router.get("/x/callback", async (req: Request, res: Response) => {
   p { color: #71767b; font-size: 14px; line-height: 1.5; }
   .handle { color: #1d9bf0; font-weight: 700; }
   .hint { margin-top: 20px; font-size: 12px; color: #536471; }
+  .button { display: inline-flex; align-items: center; justify-content: center; margin-top: 18px; padding: 12px 18px; border-radius: 12px; background: #6d28d9; color: #fff; font-weight: 800; text-decoration: none; }
 </style></head><body>
 <div class="card">
   <h1>Verified!</h1>
   <p>Welcome, <span class="handle">@${escapeHtml(profile.username)}</span></p>
-  <p>Your X account has been verified. Return to the Teep extension to complete the claim.</p>
-  <p class="hint">This tab will close automatically.</p>
+  <p>Your X account has been verified. Your creator tips are now connected to Teep.</p>
+  ${flow.returnTo ? `<a class="button" href="${escapeHtml(flow.returnTo)}">Return to Teep</a>` : `<p class="hint">You can return to Teep now.</p>`}
 </div>
 </body></html>`);
   } catch (err: any) {
@@ -484,7 +519,7 @@ router.get("/x/callback", async (req: Request, res: Response) => {
 </style></head><body>
 <div class="card">
   <h1>Verification Failed</h1>
-  <p>Something went wrong. Please try again from the Teep extension.</p>
+  <p>Something went wrong. Please return to Teep and try connecting X again.</p>
 </div>
 </body></html>`);
   }

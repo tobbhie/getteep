@@ -1038,7 +1038,7 @@ export default function Dashboard({ mode = "auto" }: { mode?: DashboardMode }) {
       const response = await fetch(`${API_BASE}/auth/x/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ownerAddress: address }),
+        body: JSON.stringify({ ownerAddress: address, returnTo: `${WEB_APP_URL}/dashboard` }),
       });
       const data = await response.json();
       if (!response.ok || !data?.authUrl) {
