@@ -395,6 +395,9 @@ const schemaSql = `
 
   CREATE INDEX IF NOT EXISTS idx_oauth_flows_expires ON oauth_flows(expires_at);
 
+  ALTER TABLE oauth_flows
+    ADD COLUMN IF NOT EXISTS return_to TEXT;
+
   CREATE TABLE IF NOT EXISTS funding_provider_sessions (
     id TEXT PRIMARY KEY,
     provider TEXT NOT NULL,

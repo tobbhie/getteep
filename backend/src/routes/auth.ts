@@ -145,19 +145,24 @@ router.post("/x/start", async (req: Request, res: Response) => {
     return;
   }
 
-  const state = crypto.randomBytes(32).toString("hex");
-  const { codeVerifier, codeChallenge } = createPkcePair();
+  try {
+    const state = crypto.randomBytes(32).toString("hex");
+    const { codeVerifier, codeChallenge } = createPkcePair();
 
-  await storeOAuthFlow(state, {
-    ownerAddress: ownerAddress.toLowerCase(),
-    codeVerifier,
-    expiresAt: Date.now() + 10 * 60 * 1000,
-    mode: "claim",
-    returnTo,
-  });
+    await storeOAuthFlow(state, {
+      ownerAddress: ownerAddress.toLowerCase(),
+      codeVerifier,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+      mode: "claim",
+      returnTo,
+    });
 
-  const authUrl = oauthService.getAuthUrl(state, codeChallenge);
-  res.json({ authUrl, state });
+    const authUrl = oauthService.getAuthUrl(state, codeChallenge);
+    res.json({ authUrl, state });
+  } catch (err: any) {
+    console.error("[Auth] OAuth start error:", err?.message || err);
+    res.status(500).json({ error: "Could not start X connection." });
+  }
 });
 
 /**
@@ -189,20 +194,25 @@ router.post("/x/refresh-profile/start", async (req: Request, res: Response) => {
     return;
   }
 
-  const state = crypto.randomBytes(32).toString("hex");
-  const { codeVerifier, codeChallenge } = createPkcePair();
+  try {
+    const state = crypto.randomBytes(32).toString("hex");
+    const { codeVerifier, codeChallenge } = createPkcePair();
 
-  await storeOAuthFlow(state, {
-    ownerAddress,
-    codeVerifier,
-    expiresAt: Date.now() + 10 * 60 * 1000,
-    mode: "refresh_profile",
-    expectedAuthorId: claim.author_id,
-    returnTo,
-  });
+    await storeOAuthFlow(state, {
+      ownerAddress,
+      codeVerifier,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+      mode: "refresh_profile",
+      expectedAuthorId: claim.author_id,
+      returnTo,
+    });
 
-  const authUrl = oauthService.getAuthUrl(state, codeChallenge);
-  res.json({ authUrl, state });
+    const authUrl = oauthService.getAuthUrl(state, codeChallenge);
+    res.json({ authUrl, state });
+  } catch (err: any) {
+    console.error("[Auth] OAuth refresh start error:", err?.message || err);
+    res.status(500).json({ error: "Could not start X connection." });
+  }
 });
 
 /**
@@ -218,19 +228,24 @@ router.post("/x/tipping/start", async (req: Request, res: Response) => {
     return;
   }
 
-  const state = crypto.randomBytes(32).toString("hex");
-  const { codeVerifier, codeChallenge } = createPkcePair();
+  try {
+    const state = crypto.randomBytes(32).toString("hex");
+    const { codeVerifier, codeChallenge } = createPkcePair();
 
-  await storeOAuthFlow(state, {
-    ownerAddress: ownerAddress.toLowerCase(),
-    codeVerifier,
-    expiresAt: Date.now() + 10 * 60 * 1000,
-    mode: "x_tipping",
-    returnTo,
-  });
+    await storeOAuthFlow(state, {
+      ownerAddress: ownerAddress.toLowerCase(),
+      codeVerifier,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+      mode: "x_tipping",
+      returnTo,
+    });
 
-  const authUrl = oauthService.getAuthUrl(state, codeChallenge);
-  res.json({ authUrl, state });
+    const authUrl = oauthService.getAuthUrl(state, codeChallenge);
+    res.json({ authUrl, state });
+  } catch (err: any) {
+    console.error("[Auth] X tipping OAuth start error:", err?.message || err);
+    res.status(500).json({ error: "Could not start X connection." });
+  }
 });
 
 /**
