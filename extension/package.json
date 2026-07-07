@@ -23,6 +23,7 @@
     "@teep/shared": "file:../shared",
     "buffer": "^6.0.3",
     "ethers": "^6.13.0",
+    "permissionless": "^0.3.6",
     "qrcode": "^1.5.4",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",

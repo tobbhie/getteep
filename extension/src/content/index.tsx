@@ -11,7 +11,9 @@ import { findTweetArticles, extractPostIdentity, hasInjectedUI, findActionBar } 
  * Observes the X DOM for tweet articles and injects tip buttons.
  */
 
-const DEBUG = typeof process !== "undefined" && (process.env?.DEBUG_TEEP === "true" || process.env?.DEBUG_TIPCOIN === "true");
+const DEBUG =
+  typeof process !== "undefined" &&
+  (process.env?.DEBUG_TEEP === "true" || process.env?.DEBUG_TIPCOIN === "true");
 if (DEBUG) console.log("[Teep] Content script loaded");
 
 // Inject tip buttons into visible tweets
@@ -53,6 +55,21 @@ function injectTipButtons(): void {
 // Run on load
 injectTipButtons();
 
+let injectionTimer: ReturnType<typeof setTimeout> | null = null;
+let injectionFrame = 0;
+
+function scheduleTipButtonInjection(delay = 120): void {
+  if (injectionTimer) return;
+  injectionTimer = setTimeout(() => {
+    injectionTimer = null;
+    if (injectionFrame) cancelAnimationFrame(injectionFrame);
+    injectionFrame = requestAnimationFrame(() => {
+      injectionFrame = 0;
+      injectTipButtons();
+    });
+  }, delay);
+}
+
 // Observe DOM mutations (X is a SPA, tweets load dynamically)
 const observer = new MutationObserver((mutations) => {
   // Debounce: only process if there are relevant mutations
@@ -64,8 +81,7 @@ const observer = new MutationObserver((mutations) => {
     }
   }
   if (shouldProcess) {
-    // Use requestAnimationFrame for performance
-    requestAnimationFrame(injectTipButtons);
+    scheduleTipButtonInjection();
   }
 });
 
@@ -80,7 +96,7 @@ const urlObserver = new MutationObserver(() => {
   if (location.href !== lastUrl) {
     lastUrl = location.href;
     // Small delay to let the new page render
-    setTimeout(injectTipButtons, 500);
+    scheduleTipButtonInjection(500);
   }
 });
 urlObserver.observe(document.querySelector("head")!, { childList: true });

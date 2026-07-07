@@ -695,11 +695,23 @@ export default function CreatorDashboardHome() {
                 </div>
                 <strong>{rawMoney(account.tipsEarnedRaw)}</strong>
                 <p>Earned creator tips held in your claim wallet and available to move.</p>
-                {Number(account.tipsEarnedRaw || 0) > 0 ? (
-                  <Link className="btn-primary" to="/creator/withdraw?source=tipsEarned">Withdraw funds</Link>
-                ) : (
-                  <button type="button" className="btn-primary" disabled>No funds to withdraw</button>
-                )}
+                <div className="creator-workspace-withdraw-actions">
+                  {Number(account.tipsEarnedRaw || 0) > 0 ? (
+                    <Link className="btn-primary" to="/creator/withdraw?source=tipsEarned">
+                      <span className="material-symbols-outlined" aria-hidden>account_balance_wallet</span>
+                      Withdraw
+                    </Link>
+                  ) : (
+                    <button type="button" className="btn-primary" disabled>
+                      <span className="material-symbols-outlined" aria-hidden>account_balance_wallet</span>
+                      No funds
+                    </button>
+                  )}
+                  <Link className="btn-secondary creator-workspace-grow-action" to="/creator/grow/earn">
+                    <span className="material-symbols-outlined" aria-hidden>eco</span>
+                    Grow Tips
+                  </Link>
+                </div>
                 <div className="creator-workspace-balance-split">
                   <div><span>Tips earned</span><strong>{rawMoney(account.tipsEarnedRaw)}</strong></div>
                   <div><span>Main balance</span><strong>{rawMoney(account.mainBalanceRaw)}</strong></div>

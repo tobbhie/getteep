@@ -70,7 +70,7 @@ class PopupErrorBoundary extends Component<{ children: ReactNode }, { hasError: 
           justifyContent: "center",
           textAlign: "center",
         }}>
-          <p style={{ fontSize: "16px", marginBottom: "8px" }}>Tipcoin couldn&apos;t load</p>
+          <p style={{ fontSize: "16px", marginBottom: "8px" }}>Teep couldn&apos;t load</p>
           <p style={{ fontSize: "12px", color: "#71767b", marginBottom: "16px" }}>{this.state.message}</p>
           <button
             onClick={() => window.location.reload()}

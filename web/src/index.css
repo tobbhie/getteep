@@ -5646,6 +5646,7 @@ body:has(.dashboard-layout),
   gap: var(--space-3);
   margin-top: var(--space-4);
 }
+
 .dashboard-referral-apply-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -15634,16 +15635,40 @@ a.creator-workspace-post-link:hover {
   line-height: 1.5;
 }
 
-.creator-workspace-withdraw > .btn-primary {
+.creator-workspace-withdraw-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.92fr);
+  gap: var(--space-3);
+}
+
+.creator-workspace-withdraw-actions .btn-primary,
+.creator-workspace-withdraw-actions .btn-secondary {
   width: 100%;
   min-height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 7px;
   text-decoration: none;
 }
 
-.creator-workspace-withdraw > button.btn-primary:disabled {
+.creator-workspace-withdraw-actions .material-symbols-outlined {
+  font-size: 18px;
+}
+
+.creator-workspace-grow-action {
+  border-color: rgba(167, 139, 250, 0.3);
+  background: rgba(255, 255, 255, 0.055);
+  color: var(--text-primary);
+}
+
+.creator-workspace-grow-action:hover {
+  border-color: rgba(167, 139, 250, 0.55);
+  background: rgba(124, 77, 255, 0.14);
+}
+
+.creator-workspace-withdraw > button.btn-primary:disabled,
+.creator-workspace-withdraw-actions button.btn-primary:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -16397,6 +16422,10 @@ a.creator-workspace-post-link:hover {
     width: 100%;
   }
 
+  .creator-workspace-withdraw-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .creator-workspace-rail-section {
     order: 2;
     width: 100%;
@@ -16618,4 +16647,10 @@ a.creator-workspace-post-link:hover {
     flex: 1;
   }
 
+}
+
+@media (max-width: 380px) {
+  .creator-workspace-withdraw-actions {
+    grid-template-columns: 1fr;
+  }
 }

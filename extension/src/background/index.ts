@@ -23,7 +23,9 @@ import {
   updateTipIntent,
 } from "../utils/tipIntent";
 
-const DEBUG = typeof process !== "undefined" && (process.env?.DEBUG_TEEP === "true" || process.env?.DEBUG_TIPCOIN === "true");
+const DEBUG =
+  typeof process !== "undefined" &&
+  (process.env?.DEBUG_TEEP === "true" || process.env?.DEBUG_TIPCOIN === "true");
 const WALLET_LAB_ENABLED = process.env.ENABLE_WALLET_LAB === "true";
 function bgLog(tag: string, msg: string, data?: unknown) {
   if (DEBUG) console.log(`[Teep:BG:${tag}]`, msg, data ?? "");

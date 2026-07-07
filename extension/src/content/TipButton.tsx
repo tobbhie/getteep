@@ -421,7 +421,7 @@ export const TipButton: React.FC<TipButtonProps> = ({ tweetId, authorHandle }) =
         <>
           <div id={dialogTitleId} style={S.panelTitle}>Tip @{authorHandle}</div>
           <div id={dialogDescriptionId} style={S.srOnly}>
-            Choose an amount in test USDC, then review the tip before sending.
+            Choose an amount in test USD, then review the tip before sending.
           </div>
           {cachedBalance != null && (
             <div style={S.balanceRow}>Balance: {formatUSDC(cachedBalance)}</div>
@@ -480,7 +480,7 @@ export const TipButton: React.FC<TipButtonProps> = ({ tweetId, authorHandle }) =
                 setCustomError("");
               }}
               onKeyDown={(e) => { if (e.key === "Enter") handleCustomSubmit(); }}
-              aria-label="Custom tip amount in test USDC"
+              aria-label="Custom tip amount in test USD"
               data-teep-control="true"
               style={S.customInput}
             />
@@ -500,7 +500,7 @@ export const TipButton: React.FC<TipButtonProps> = ({ tweetId, authorHandle }) =
       {state === "confirming" && (
         <>
           <div id={dialogTitleId} style={S.panelTitle}>
-            Send <span style={{ color: "#1d9bf0" }}>${selectedAmount}</span> in test USDC
+            Send <span style={{ color: "#1d9bf0" }}>${selectedAmount}</span> in test USD
           </div>
           <div id={dialogDescriptionId} style={S.panelSub}>to @{authorHandle}</div>
           <div style={S.confirmRow}>
@@ -541,10 +541,10 @@ export const TipButton: React.FC<TipButtonProps> = ({ tweetId, authorHandle }) =
             : isOpen ? "#1d9bf0"
             : "#71767b",
         }}
-        title={`Tip @${authorHandle} with test USDC`}
+        title={`Tip @${authorHandle} with Teep`}
         aria-expanded={isOpen}
         aria-haspopup="dialog"
-        aria-label={`Tip @${authorHandle} with test USDC`}
+        aria-label={`Tip @${authorHandle} with Teep`}
         data-teep-control="true"
       >
         <span style={S.iconWrap}>{coinIcon}</span>

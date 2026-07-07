@@ -15,8 +15,11 @@ const LOCAL_URL_RE = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/
 function assertProductionEnv(env) {
   if (env.ALLOW_INSECURE_EXTENSION_BUILD === "true") return;
 
-  const required = ["API_BASE_URL", "WEB_APP_URL", "PRIVY_APP_ID"];
+  const required = ["API_BASE_URL", "WEB_APP_URL", "PRIVY_APP_ID", "TIP_CONTRACT_ADDRESS", "USDC_ADDRESS"];
   const missing = required.filter((key) => !env[key]);
+  if (!env.WALLET_FACTORY_ADDRESS && !env.FACTORY_ADDRESS) {
+    missing.push("WALLET_FACTORY_ADDRESS");
+  }
   if (missing.length) {
     throw new Error(`Production extension build is missing required env: ${missing.join(", ")}`);
   }
@@ -166,6 +169,7 @@ module.exports = (_env, argv) => {
     clean: true,
   },
   resolve: {
+    modules: [path.resolve(__dirname, "node_modules"), "node_modules"],
     extensions: [".ts", ".tsx", ".js", ".jsx"],
     fallback: {
       buffer: require.resolve("buffer/"),
@@ -225,7 +229,7 @@ module.exports = (_env, argv) => {
       "process.env.BLUR_EMAIL": JSON.stringify(process.env.BLUR_EMAIL || "false"),
       "process.env.DEBUG_TEEP": JSON.stringify(process.env.DEBUG_TEEP === "true" ? "true" : "false"),
       "process.env.DEBUG_TIPCOIN": JSON.stringify(process.env.DEBUG_TIPCOIN === "true" ? "true" : "false"),
-      "process.env.WEB_APP_URL": JSON.stringify(process.env.WEB_APP_URL || "https://tipcoin.xyz"),
+      "process.env.WEB_APP_URL": JSON.stringify(process.env.WEB_APP_URL || "https://getteep.xyz"),
       "process.env.API_BASE_URL": JSON.stringify(process.env.API_BASE_URL || "http://127.0.0.1:3001"),
       "process.env.RPC_URL": JSON.stringify(process.env.RPC_URL || ""),
       "process.env.ARC_RPC_URL": JSON.stringify(process.env.ARC_RPC_URL || ""),

@@ -89,6 +89,21 @@ function safeAddress(address?: string): string | null {
   if (!address) return null;
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
+function isTrustedOAuthUrl(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  try {
+    const url = new URL(value);
+    const trustedHost = url.hostname === "x.com" || url.hostname === "twitter.com";
+    return url.protocol === "https:" && trustedHost && url.pathname.startsWith("/i/oauth2/authorize");
+  } catch {
+    return false;
+  }
+}
+function openTrustedOAuthTab(value: unknown): boolean {
+  if (!isTrustedOAuthUrl(value)) return false;
+  chrome.tabs.create({ url: value });
+  return true;
+}
 async function drawReceiptQr(ctx: CanvasRenderingContext2D, receiptUrl: string, x: number, y: number, size: number) {
   if (!receiptUrl) return;
   const qrCanvas = document.createElement("canvas");
@@ -1124,12 +1139,9 @@ export const App: React.FC = () => {
         body: JSON.stringify({ ownerAddress: walletAddress }),
       });
       const data = await res.json();
-      if (data.authUrl) {
-        chrome.tabs.create({ url: data.authUrl });
-      } else {
-        setError("Failed to start verification");
-        setClaimStatus("idle");
-      }
+      if (openTrustedOAuthTab(data.authUrl)) return;
+      setError("Failed to start verification");
+      setClaimStatus("idle");
     } catch (err: any) {
       setError(err.message);
       setClaimStatus("idle");
@@ -1151,8 +1163,10 @@ export const App: React.FC = () => {
       if (!res.ok || !data.authUrl) {
         throw new Error(data.error || "Could not start X profile refresh");
       }
+      if (!openTrustedOAuthTab(data.authUrl)) {
+        throw new Error("Unexpected X verification URL");
+      }
       setProfileRefreshMsg("Complete the X check, then return here.");
-      chrome.tabs.create({ url: data.authUrl });
     } catch (err: any) {
       setError(err?.message || "Could not refresh X profile");
       setProfileRefreshStatus("idle");

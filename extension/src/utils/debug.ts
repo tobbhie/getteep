@@ -6,7 +6,7 @@
 const DEBUG =
   typeof process !== "undefined" &&
   process.env &&
-  process.env.DEBUG_TEEP === "true" || process.env.DEBUG_TIPCOIN === "true";
+  (process.env.DEBUG_TEEP === "true" || process.env.DEBUG_TIPCOIN === "true");
 
 export const isDebug = (): boolean => !!DEBUG;
 

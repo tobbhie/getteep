@@ -23,8 +23,11 @@ function localUrl(value) {
 }
 
 function requireReleaseEnvironment() {
-  const required = ["API_BASE_URL", "WEB_APP_URL", "PRIVY_APP_ID"];
+  const required = ["API_BASE_URL", "WEB_APP_URL", "PRIVY_APP_ID", "TIP_CONTRACT_ADDRESS", "USDC_ADDRESS"];
   const missing = required.filter((name) => !process.env[name]);
+  if (!process.env.WALLET_FACTORY_ADDRESS && !process.env.FACTORY_ADDRESS) {
+    missing.push("WALLET_FACTORY_ADDRESS");
+  }
   if (missing.length) {
     fail(
       `Release build requires explicit production environment values: ${missing.join(", ")}. ` +

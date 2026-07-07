@@ -588,102 +588,6 @@ export default function DashboardWithdraw() {
         <div className="withdraw-grid">
           {/* Left column — match code.html lg:col-span-7 */}
           <div className="withdraw-left" style={{ minWidth: 0 }}>
-            <h3 className="withdraw-section-title" style={{ fontSize: "var(--text-heading)", fontWeight: 700, display: "flex", alignItems: "center", gap: "var(--space-2)", margin: "0 0 var(--space-6) 0", color: "var(--text-primary)" }}>
-              <span className="material-symbols-outlined" style={{ fontSize: 22, color: primary }}>account_balance</span>
-              Select Withdrawal Source
-            </h3>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)", marginBottom: "var(--space-6)" }}>
-              {/* Tip Balance card — active when selected */}
-              <div
-                className="withdraw-source-card"
-                role="button"
-                tabIndex={0}
-                onClick={() => selectWithdrawalSource("tipBalance")}
-                onKeyDown={(e) => e.key === "Enter" && selectWithdrawalSource("tipBalance")}
-                style={{
-                  position: "relative",
-                  display: "flex",
-                  alignItems: "stretch",
-                  justifyContent: "space-between",
-                  gap: "var(--space-4)",
-                  padding: "var(--space-6)",
-                  borderRadius: "var(--radius-md)",
-                  background: "var(--bg-card)",
-                  border: withdrawalSource === "tipBalance" ? `2px solid ${primary}` : "1px solid var(--border)",
-                  boxShadow: withdrawalSource === "tipBalance" ? `0 4px 24px ${primary}20` : "none",
-                  cursor: "pointer",
-                }}
-              >
-                {withdrawalSource === "tipBalance" && (
-                  <span style={{ position: "absolute", top: -10, right: 24, background: primary, color: "#fff", fontSize: 10, fontWeight: 700, padding: "4px 8px", borderRadius: "var(--radius-full)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                    Active Selection
-                  </span>
-                )}
-                <div style={{ flex: "1 1 auto", display: "flex", flexDirection: "column", justifyContent: "space-between", gap: "var(--space-4)" }}>
-                  <div>
-                    <p style={{ fontSize: "1.75rem", fontWeight: 900, margin: "0 0 4px 0", color: withdrawalSource === "tipBalance" ? primary : "var(--text-muted)" }}>${formatUsd(tipBalance)}</p>
-                    <p style={{ fontSize: "var(--text-heading)", fontWeight: 700, color: "var(--text-primary)", margin: 0 }}>Tip Balance</p>
-                    <p style={{ fontSize: "var(--text-small)", color: "var(--text-secondary)", margin: "4px 0 0 0" }}>
-                      Available to tip creators (plus your referral bonus)
-                    </p>
-                    <button type="button" style={{ marginTop: "var(--space-4)", display: "inline-flex", alignItems: "center", gap: 8, padding: "10px 20px", borderRadius: "var(--radius-sm)", fontSize: "var(--text-small)", fontWeight: 700, border: "none", cursor: "pointer", background: withdrawalSource === "tipBalance" ? primary : "var(--bg-elevated)", color: withdrawalSource === "tipBalance" ? "#fff" : "var(--text-primary)" }}>
-                      {withdrawalSource === "tipBalance" ? <>Selected <span className="material-symbols-outlined" style={{ fontSize: 18 }}>check_circle</span></> : "Switch Source"}
-                    </button>
-                  </div>
-                </div>
-                <div style={{ width: 160, minHeight: 80, background: `linear-gradient(135deg, ${primary}20, ${primary}40)`, border: `1px solid ${primary}30`, borderRadius: "var(--radius-md)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: 40, color: `${primary}80` }}>payments</span>
-                </div>
-              </div>
-
-              {/* Tips Earned card */}
-              <div
-                className="withdraw-source-card"
-                role="button"
-                tabIndex={0}
-                onClick={() => canUseTipsEarned && selectWithdrawalSource("tipsEarned")}
-                onKeyDown={(e) => canUseTipsEarned && e.key === "Enter" && selectWithdrawalSource("tipsEarned")}
-                style={{
-                  position: "relative",
-                  display: "flex",
-                  alignItems: "stretch",
-                  justifyContent: "space-between",
-                  gap: "var(--space-4)",
-                  padding: "var(--space-6)",
-                  borderRadius: "var(--radius-md)",
-                  background: "var(--bg-card)",
-                  border: withdrawalSource === "tipsEarned" ? `2px solid ${primary}` : "1px solid var(--border)",
-                  boxShadow: withdrawalSource === "tipsEarned" ? `0 4px 24px ${primary}20` : "none",
-                  cursor: canUseTipsEarned ? "pointer" : "not-allowed",
-                  opacity: canUseTipsEarned ? 1 : 0.7,
-                }}
-              >
-                {withdrawalSource === "tipsEarned" && (
-                  <span style={{ position: "absolute", top: -10, right: 24, background: primary, color: "#fff", fontSize: 10, fontWeight: 700, padding: "4px 8px", borderRadius: "var(--radius-full)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                    Active Selection
-                  </span>
-                )}
-                <div style={{ flex: "1 1 auto", display: "flex", flexDirection: "column", justifyContent: "space-between", gap: "var(--space-4)" }}>
-                  <div>
-                    <p style={{ fontSize: "1.75rem", fontWeight: 900, margin: "0 0 4px 0", color: withdrawalSource === "tipsEarned" ? primary : "var(--text-muted)" }}>${formatUsd(tipsEarnedBalance)}</p>
-                    <p style={{ fontSize: "var(--text-heading)", fontWeight: 700, color: "var(--text-primary)", margin: 0 }}>Tips Earned</p>
-                    <p style={{ fontSize: "var(--text-small)", color: "var(--text-secondary)", margin: "4px 0 0 0" }}>
-                      Available balance of money earned from tips
-                    </p>
-                    {!canUseTipsEarned && <p style={{ fontSize: "var(--text-caption)", color: "var(--text-muted)", marginTop: 4 }}>Verify your X account from the web app to withdraw tips earned.</p>}
-                    <button type="button" style={{ marginTop: "var(--space-4)", display: "inline-flex", alignItems: "center", gap: 8, padding: "10px 20px", borderRadius: "var(--radius-sm)", fontSize: "var(--text-small)", fontWeight: 700, border: "none", cursor: canUseTipsEarned ? "pointer" : "default", background: withdrawalSource === "tipsEarned" ? primary : "var(--bg-elevated)", color: withdrawalSource === "tipsEarned" ? "#fff" : "var(--text-primary)" }}>
-                      {withdrawalSource === "tipsEarned" ? <>Selected <span className="material-symbols-outlined" style={{ fontSize: 18 }}>check_circle</span></> : "Switch Source"}
-                    </button>
-                  </div>
-                </div>
-                <div style={{ width: 160, minHeight: 80, background: "var(--bg-elevated)", border: "1px solid var(--border)", borderRadius: "var(--radius-md)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: 40, color: "var(--text-muted)" }}>pending_actions</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Select Withdrawal Method — sub-heading above pills (match "Select Withdrawal Source" style) */}
             <h3 style={{ fontSize: "var(--text-heading)", fontWeight: 700, display: "flex", alignItems: "center", gap: "var(--space-2)", margin: "0 0 var(--space-4) 0", color: "var(--text-primary)" }}>
               <span className="material-symbols-outlined" style={{ fontSize: 22, color: primary }}>account_balance</span>
               Select Withdrawal Method
@@ -727,6 +631,64 @@ export default function DashboardWithdraw() {
                   <span className="material-symbols-outlined" style={{ fontSize: 14 }}>info</span>
                   Make sure this destination is correct before continuing.
                 </p>
+              </div>
+
+              <div style={{ marginBottom: "var(--space-6)" }}>
+                <label style={{ display: "block", fontSize: "var(--text-small)", fontWeight: 700, color: "var(--text-secondary)", marginBottom: 10 }}>Withdrawal Source</label>
+                <div role="radiogroup" aria-label="Withdrawal source" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "var(--space-3)" }}>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={withdrawalSource === "tipBalance"}
+                    onClick={() => selectWithdrawalSource("tipBalance")}
+                    style={{
+                      textAlign: "left",
+                      display: "grid",
+                      gap: 8,
+                      padding: "14px",
+                      borderRadius: "var(--radius-md)",
+                      border: withdrawalSource === "tipBalance" ? `2px solid ${primary}` : "1px solid var(--border)",
+                      background: "var(--bg-page)",
+                      color: "var(--text-primary)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                      <strong style={{ fontSize: "var(--text-small)" }}>Tip Balance</strong>
+                      <span className="material-symbols-outlined" title="Your available Teep balance for tipping or withdrawal." aria-label="Your available Teep balance for tipping or withdrawal." style={{ fontSize: 17, color: "var(--text-muted)" }}>info</span>
+                    </span>
+                    <span style={{ color: "var(--text-primary)", fontSize: "1.1rem", fontWeight: 900 }}>${formatUsd(tipBalance)}</span>
+                    <span style={{ color: "var(--text-secondary)", fontSize: 12, lineHeight: 1.35 }}>Available balance, including referral rewards.</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={withdrawalSource === "tipsEarned"}
+                    disabled={!canUseTipsEarned}
+                    onClick={() => canUseTipsEarned && selectWithdrawalSource("tipsEarned")}
+                    style={{
+                      textAlign: "left",
+                      display: "grid",
+                      gap: 8,
+                      padding: "14px",
+                      borderRadius: "var(--radius-md)",
+                      border: withdrawalSource === "tipsEarned" ? `2px solid ${primary}` : "1px solid var(--border)",
+                      background: "var(--bg-page)",
+                      color: "var(--text-primary)",
+                      cursor: canUseTipsEarned ? "pointer" : "not-allowed",
+                      opacity: canUseTipsEarned ? 1 : 0.62,
+                    }}
+                  >
+                    <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                      <strong style={{ fontSize: "var(--text-small)" }}>Tips Earned</strong>
+                      <span className="material-symbols-outlined" title="Creator earnings from supported posts. X verification is required." aria-label="Creator earnings from supported posts. X verification is required." style={{ fontSize: 17, color: "var(--text-muted)" }}>info</span>
+                    </span>
+                    <span style={{ color: "var(--text-primary)", fontSize: "1.1rem", fontWeight: 900 }}>${formatUsd(tipsEarnedBalance)}</span>
+                    <span style={{ color: "var(--text-secondary)", fontSize: 12, lineHeight: 1.35 }}>
+                      {canUseTipsEarned ? "Creator earnings ready to withdraw." : "Verify X to use this source."}
+                    </span>
+                  </button>
+                </div>
               </div>
 
               <div style={{ marginBottom: "var(--space-6)" }}>
