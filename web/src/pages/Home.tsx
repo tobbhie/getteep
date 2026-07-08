@@ -21,7 +21,7 @@ const STATIC_HERO_POST = {
 
 const HERO_DECLARATIONS = [
   "Tip creators directly from social posts.",
-  "Claim tips without crypto stress.",
+  "Claim tips in one Teep account.",
   "Let idle tips keep working.",
 ];
 
@@ -651,14 +651,14 @@ export default function Home() {
           <div className="lp-hero-copy">
             <p className="lp-eyebrow"><Icon name="coin" /> Social finance for creators and communities</p>
             <h1>Tip creators anywhere on the internet.</h1>
-            <div className="lp-hero-loop" aria-label="Tip from posts. Claim instantly. Grow idle tips.">
+            <div className="lp-hero-loop" aria-label="Tip from posts. Claim in Teep. Grow idle tips.">
               <Icon name="bolt" />
               <span className="lp-hero-loop-copy" aria-hidden="true">
                 {HERO_DECLARATIONS.map((text, index) => (
                   <span key={text} style={{ "--loop-index": index } as CSSProperties}>{text}</span>
                 ))}
               </span>
-              <span className="lp-hero-loop-fallback">Tip from posts. Claim instantly. Grow idle tips.</span>
+              <span className="lp-hero-loop-fallback">Tip from posts. Claim in Teep. Grow idle tips.</span>
             </div>
             <div className="lp-hero-actions">
               <a href="/dashboard" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn--primary"><Icon name="wallet" /> Launch App</a>

@@ -52,6 +52,15 @@ export default function Privacy() {
         credit decisions, advertising, or sale to data brokers.
       </p>
 
+      <h2 style={headingStyle}>Connected X features</h2>
+      <p style={sectionStyle}>
+        When you choose to connect X for Teep tip commands, Teep stores the connected X account identifier,
+        username, Teep account address, command preferences, and safety limits needed to recognize and process
+        commands from that X account. Connecting X for this purpose enables X tip commands with default limits
+        unless you pause or change them in Settings. Creating a Teep account by itself does not enable X tip
+        commands.
+      </p>
+
       <h2 style={headingStyle}>Service providers</h2>
       <p style={sectionStyle}>
         Teep uses service providers to operate the product. These currently include Privy for authentication

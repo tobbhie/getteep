@@ -64,7 +64,11 @@ export function buildInsufficientBalanceReply(handle?: string) {
 }
 
 export function buildFailureReply(reason: string) {
-  return ["Couldn't send this tip yet.", "", `Reason: ${reason}`].join("\n");
+  const lines = ["Couldn't send this tip yet.", "", `Reason: ${reason}`];
+  if (/settings/i.test(reason)) {
+    lines.push(`Settings: ${buildAppUrl("/dashboard/settings", { tab: "tipping" })}`);
+  }
+  return lines.join("\n");
 }
 
 export function buildSuccessReply(params: {

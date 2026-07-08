@@ -9,6 +9,7 @@ import { createWalletChallenge, isWalletAuthPurpose, verifyWalletProof } from ".
 import { createBackendPublicClient } from "../services/rpcClient";
 import { createCreatorClaimedNotifications } from "../services/notifications";
 import { claimPendingTipsForXUser } from "../services/teepBalance";
+import { formatUsdcRaw } from "../services/xBot/parseTipCommand";
 
 const FACTORY_ABI = [
   { name: "isDeployed", type: "function", stateMutability: "view", inputs: [{ name: "_authorId", type: "uint256" }], outputs: [{ type: "bool" }] },
@@ -335,15 +336,20 @@ router.get("/x/callback", async (req: Request, res: Response) => {
       ).run(profile.id, ownerAddress, profile.username);
 
       const tokenAddress = (process.env.USDC_ADDRESS || "0x3600000000000000000000000000000000000000").toLowerCase();
+      const maxPerTipRaw = process.env.X_BOT_MAX_PER_TIP_RAW || "10000000";
+      const maxDailyRaw = process.env.X_BOT_MAX_DAILY_RAW || "50000000";
       await db.prepare(
         `INSERT INTO x_tipping_permissions (user_address, enabled, token_address, max_per_tip_raw, max_daily_raw, updated_at)
-         VALUES (?, false, ?, ?, ?, now())
-         ON CONFLICT(user_address) DO NOTHING`
+         VALUES (?, true, ?, ?, ?, now())
+         ON CONFLICT(user_address) DO UPDATE SET
+           enabled = TRUE,
+           token_address = excluded.token_address,
+           updated_at = now()`
       ).run(
         ownerAddress,
         tokenAddress,
-        process.env.X_BOT_MAX_PER_TIP_RAW || "10000000",
-        process.env.X_BOT_MAX_DAILY_RAW || "50000000"
+        maxPerTipRaw,
+        maxDailyRaw
       );
 
       const claimResult = await claimPendingTipsForXUser(profile.id, ownerAddress);
@@ -353,19 +359,20 @@ router.get("/x/callback", async (req: Request, res: Response) => {
 
       res.setHeader("Content-Type", "text/html");
       res.send(`<!DOCTYPE html>
-<html><head><title>Teep - X Tipping Linked</title>
+<html><head><title>Teep - X Tipping Active</title>
 <style>
   body { background: #0a0a0a; color: #e5e5e5; font-family: -apple-system, system-ui, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
   .card { text-align: center; padding: 40px; background: #111; border-radius: 16px; border: 1px solid #1a1a2e; max-width: 420px; }
   h1 { font-size: 24px; color: #00ba7c; margin-bottom: 8px; }
   p { color: #71767b; font-size: 14px; line-height: 1.5; }
   .handle { color: #1d9bf0; font-weight: 700; }
+  .limits { margin-top: 18px; padding: 14px; background: #18131f; border: 1px solid #2f2540; border-radius: 12px; color: #b8a7d9; }
   .button { display: inline-flex; align-items: center; justify-content: center; margin-top: 18px; padding: 12px 18px; border-radius: 12px; background: #6d28d9; color: #fff; font-weight: 800; text-decoration: none; }
 </style></head><body>
 <div class="card">
-  <h1>X account linked</h1>
-  <p><span class="handle">@${escapeHtml(profile.username)}</span> is linked for Teep X tipping.</p>
-  <p>Fund your Teep balance and enable X tipping in dashboard settings.</p>
+  <h1>X tipping is active</h1>
+  <p><span class="handle">@${escapeHtml(profile.username)}</span> is connected. You can now tip from X using <strong>@teepagent tip @username $5</strong>.</p>
+  <p class="limits">Default safety limits are active: up to ${escapeHtml(formatUsdcRaw(BigInt(maxPerTipRaw)))} per tip and ${escapeHtml(formatUsdcRaw(BigInt(maxDailyRaw)))} per day. You can pause or change this anytime in Settings.</p>
   ${flow.returnTo ? `<a class="button" href="${escapeHtml(flow.returnTo)}">Return to Teep</a>` : ""}
 </div>
 </body></html>`);

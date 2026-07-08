@@ -49,6 +49,10 @@ type PreparedTip = {
   sourceTweetId: string;
 };
 
+function dbBool(value: unknown) {
+  return value === true || value === 1;
+}
+
 function nowMs() {
   return Date.now();
 }
@@ -82,8 +86,31 @@ async function resolveSender(authorId: string): Promise<SenderAccount | null> {
   const row = await db
     .prepare(`SELECT user_address, x_username FROM x_accounts WHERE x_user_id = ?`)
     .get(authorId) as { user_address: string; x_username: string } | undefined;
-  if (!row) return null;
-  return { userAddress: row.user_address.toLowerCase(), xUsername: row.x_username };
+  if (row) return { userAddress: row.user_address.toLowerCase(), xUsername: row.x_username };
+
+  const claim = await db
+    .prepare(
+      `SELECT owner_address, username FROM verified_claims
+       WHERE author_id = ? ORDER BY verified_at DESC LIMIT 1`
+    )
+    .get(authorId) as { owner_address: string; username: string } | undefined;
+  if (!claim) return null;
+  return { userAddress: claim.owner_address.toLowerCase(), xUsername: claim.username };
+}
+
+async function ensureDefaultTippingPermission(userAddress: string) {
+  const db = getDb();
+  const tokenAddress = getDefaultTokenAddress();
+  await db.prepare(
+    `INSERT INTO x_tipping_permissions (user_address, enabled, token_address, max_per_tip_raw, max_daily_raw, updated_at)
+     VALUES (?, TRUE, ?, ?, ?, now())
+     ON CONFLICT(user_address) DO NOTHING`
+  ).run(
+    userAddress.toLowerCase(),
+    tokenAddress,
+    process.env.X_BOT_MAX_PER_TIP_RAW || "10000000",
+    process.env.X_BOT_MAX_DAILY_RAW || "50000000"
+  );
 }
 
 async function resolveRecipient(intent: TipIntent, post: XIncomingPost): Promise<RecipientAccount | null> {
@@ -147,11 +174,11 @@ async function getTippingPermissions(userAddress: string) {
       `SELECT enabled, max_per_tip_raw, max_daily_raw, token_address FROM x_tipping_permissions WHERE user_address = ?`
     )
     .get(userAddress.toLowerCase()) as
-    | { enabled: boolean; max_per_tip_raw: string; max_daily_raw: string; token_address: string }
+    | { enabled: boolean | number; max_per_tip_raw: string; max_daily_raw: string; token_address: string }
     | undefined;
 
   return {
-    enabled: row?.enabled === true,
+    enabled: dbBool(row?.enabled),
     maxPerTipRaw: BigInt(row?.max_per_tip_raw || process.env.X_BOT_MAX_PER_TIP_RAW || "10000000"),
     maxDailyRaw: BigInt(row?.max_daily_raw || process.env.X_BOT_MAX_DAILY_RAW || "50000000"),
     tokenAddress: (row?.token_address || tokenAddress).toLowerCase(),
@@ -165,7 +192,11 @@ async function validateBatch(params: {
 }) {
   const permissions = await getTippingPermissions(params.senderAddress);
   if (!permissions.enabled) {
-    return { ok: false as const, code: "X_TIPPING_DISABLED", reason: "X tipping is not enabled for this account." };
+    return {
+      ok: false as const,
+      code: "X_TIPPING_DISABLED",
+      reason: "X tip commands are paused for this account. Open Teep settings to enable them.",
+    };
   }
 
   for (const amountRaw of params.amountsRaw) {
@@ -173,14 +204,14 @@ async function validateBatch(params: {
       return {
         ok: false as const,
         code: "BELOW_MINIMUM",
-        reason: `Minimum tip is ${formatUsdcRaw(MIN_TIP_RAW)} USDC.`,
+        reason: `Minimum tip is ${formatUsdcRaw(MIN_TIP_RAW)} USD.`,
       };
     }
     if (amountRaw > permissions.maxPerTipRaw) {
       return {
         ok: false as const,
         code: "MAX_PER_TIP",
-        reason: `Maximum per-tip limit is ${formatUsdcRaw(permissions.maxPerTipRaw)} USDC.`,
+        reason: `This is above your Max per tip on X (${formatUsdcRaw(permissions.maxPerTipRaw)} USD). Open Teep settings to raise the limit.`,
       };
     }
   }
@@ -189,7 +220,11 @@ async function validateBatch(params: {
   const chainId = getDefaultChainId();
   const dailyTotal = await getDailyXBotTipTotal(params.senderAddress, params.tokenAddress, chainId);
   if (dailyTotal + totalRaw > permissions.maxDailyRaw) {
-    return { ok: false as const, code: "DAILY_LIMIT", reason: "Daily X tipping limit reached." };
+    return {
+      ok: false as const,
+      code: "DAILY_LIMIT",
+      reason: `This would pass your Daily tip limit on X (${formatUsdcRaw(permissions.maxDailyRaw)} USD). Open Teep settings to raise the limit.`,
+    };
   }
 
   const balance = await getTeepBalance({
@@ -272,6 +307,7 @@ export async function processIncomingPost(post: XIncomingPost): Promise<ProcessP
     await markProcessed(post.id, post.authorId, "failed", "SENDER_NOT_REGISTERED");
     return { tweetId: post.id, status: "failed", code: "SENDER_NOT_REGISTERED", replyText };
   }
+  await ensureDefaultTippingPermission(sender.userAddress);
 
   const tokenAddress = getDefaultTokenAddress();
   const chainId = getDefaultChainId();

@@ -3,7 +3,7 @@ import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { usePrivy } from "@privy-io/react-auth";
 import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
 import { getTeepActivityTitle } from "@teep/shared";
-import { API_BASE } from "../config";
+import { API_BASE, WEB_APP_URL } from "../config";
 import DashboardShell from "../components/DashboardShell";
 import { DashboardConnectPage, DashboardPreparingPage } from "../components/DashboardAuthState";
 
@@ -93,6 +93,35 @@ type WithdrawalRecord = {
   createdAt: number;
 };
 
+type XTippingStatus = {
+  balanceRaw: string;
+  balanceUsd: string;
+  xAccount: {
+    xUserId: string;
+    username: string;
+    verifiedAt: string;
+  } | null;
+  permissions: {
+    enabled: boolean;
+    maxPerTipRaw: string;
+    maxDailyRaw: string;
+  };
+};
+
+const TRUSTED_X_AUTH_ORIGINS = new Set(["https://x.com", "https://twitter.com", "https://api.x.com"]);
+
+function safeXAuthUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") return null;
+    if (!TRUSTED_X_AUTH_ORIGINS.has(url.origin)) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 function shortAddress(address: string) {
   return address ? `${address.slice(0, 6)}...${address.slice(-4)}` : "None";
 }
@@ -166,6 +195,23 @@ function formatUsdRaw(raw?: string) {
   if (!raw) return "$0.00";
   const value = Number(BigInt(raw)) / 1e6;
   return `$${value.toFixed(2)}`;
+}
+
+function rawToUsdInput(raw?: string) {
+  if (!raw || !/^[0-9]+$/.test(raw)) return "0.00";
+  const cents = Number(BigInt(raw)) / 1e6;
+  return cents.toFixed(2);
+}
+
+function usdInputToRaw(value: string) {
+  const trimmed = value.trim().replace(/^\$/, "");
+  if (!/^\d+(\.\d{0,6})?$/.test(trimmed)) {
+    throw new Error("Enter a valid dollar amount.");
+  }
+  const [whole, fraction = ""] = trimmed.split(".");
+  const raw = BigInt(whole || "0") * 1_000_000n + BigInt(fraction.padEnd(6, "0").slice(0, 6) || "0");
+  if (raw <= 0n) throw new Error("Limit amounts must be greater than zero.");
+  return raw.toString();
 }
 
 function formatDate(value?: number) {
@@ -280,6 +326,13 @@ export default function DashboardSettings() {
   const [deactivateConfirmOpen, setDeactivateConfirmOpen] = useState(false);
   const [deactivateText, setDeactivateText] = useState("");
   const [deactivateMsg, setDeactivateMsg] = useState("");
+  const [xTippingStatus, setXTippingStatus] = useState<XTippingStatus | null>(null);
+  const [xTippingLoading, setXTippingLoading] = useState(false);
+  const [xTippingSaving, setXTippingSaving] = useState(false);
+  const [xTippingLinking, setXTippingLinking] = useState(false);
+  const [xTippingEnabled, setXTippingEnabled] = useState(false);
+  const [xMaxPerTip, setXMaxPerTip] = useState("10.00");
+  const [xMaxDaily, setXMaxDaily] = useState("50.00");
 
   const [fundingRecords, setFundingRecords] = useState<FundingRecord[]>([]);
   const [fundingTotal, setFundingTotal] = useState(0);
@@ -390,6 +443,34 @@ export default function DashboardSettings() {
       })
       .finally(() => setWithdrawalLoading(false));
   }, [address, withdrawalDay, withdrawalPage]);
+
+  const loadXTippingStatus = useCallback(async () => {
+    if (!address) {
+      setXTippingStatus(null);
+      setXTippingEnabled(false);
+      return;
+    }
+    setXTippingLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/x-balance/${address}`);
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload) throw new Error(payload?.error || "Could not load X tipping settings.");
+      const next = payload as XTippingStatus;
+      setXTippingStatus(next);
+      setXTippingEnabled(Boolean(next.permissions?.enabled));
+      setXMaxPerTip(rawToUsdInput(next.permissions?.maxPerTipRaw));
+      setXMaxDaily(rawToUsdInput(next.permissions?.maxDailyRaw));
+    } catch (error) {
+      setXTippingStatus(null);
+      showToast(error instanceof Error ? error.message : "Could not load X tipping settings.");
+    } finally {
+      setXTippingLoading(false);
+    }
+  }, [address, showToast]);
+
+  useEffect(() => {
+    void loadXTippingStatus();
+  }, [loadXTippingStatus]);
 
   useEffect(() => {
     if (!hasUnsavedChanges) return;
@@ -559,6 +640,84 @@ export default function DashboardSettings() {
     } as Parameters<typeof smartWalletClient.signMessage>[0]);
     return { message: challenge.message, signature };
   }, [address, smartWalletClient]);
+
+  const startXTippingLink = useCallback(async () => {
+    if (!address) {
+      showToast("Connect your Teep account first.");
+      return;
+    }
+    setXTippingLinking(true);
+    try {
+      const response = await fetch(`${API_BASE}/auth/x/tipping/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ownerAddress: address, returnTo: `${WEB_APP_URL}/dashboard/settings?tab=tipping` }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.authUrl) {
+        throw new Error(payload.error || "Could not start X connection.");
+      }
+      const authUrl = safeXAuthUrl(payload.authUrl);
+      if (!authUrl) {
+        throw new Error("X returned an unexpected connection URL.");
+      }
+      const popup = window.open(authUrl, "_blank", "noopener,noreferrer");
+      showToast(popup ? "Finish connecting X in the new tab, then return here." : "Your browser blocked the X window. Please allow popups and try again.");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not start X connection.");
+    } finally {
+      setXTippingLinking(false);
+    }
+  }, [address, showToast]);
+
+  const saveXTippingPermissions = useCallback(async (nextEnabled = xTippingEnabled) => {
+    if (!address) {
+      showToast("Connect your Teep account first.");
+      return;
+    }
+    if (nextEnabled && !xTippingStatus?.xAccount) {
+      showToast("Connect X before enabling X tipping.");
+      return;
+    }
+    let maxPerTipRaw: string;
+    let maxDailyRaw: string;
+    try {
+      maxPerTipRaw = usdInputToRaw(xMaxPerTip);
+      maxDailyRaw = usdInputToRaw(xMaxDaily);
+      if (BigInt(maxDailyRaw) < BigInt(maxPerTipRaw)) {
+        throw new Error("Daily limit must be at least the per-tip limit.");
+      }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Check the limit amounts.");
+      return;
+    }
+    setXTippingSaving(true);
+    try {
+      const proof = await requestWalletProof();
+      const response = await fetch(`${API_BASE}/x-balance/permissions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          address,
+          proof,
+          enabled: nextEnabled,
+          maxPerTipRaw,
+          maxDailyRaw,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Could not save X tipping settings.");
+      setXTippingEnabled(Boolean(payload.enabled));
+      setXMaxPerTip(rawToUsdInput(payload.maxPerTipRaw));
+      setXMaxDaily(rawToUsdInput(payload.maxDailyRaw));
+      await loadXTippingStatus();
+      showToast(nextEnabled ? "X tipping is enabled." : "X tipping is paused.");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not save X tipping settings.");
+    } finally {
+      setXTippingSaving(false);
+    }
+  }, [address, loadXTippingStatus, requestWalletProof, showToast, xMaxDaily, xMaxPerTip, xTippingEnabled, xTippingStatus?.xAccount]);
 
   const downloadCsv = useCallback((kind: "funding" | "withdrawals") => {
     const rows = kind === "funding"
@@ -768,12 +927,107 @@ export default function DashboardSettings() {
               {currentTab === "tipping" && (
                 <>
                   <div className="dashboard-settings-panel-head">
-                    <div><h3>Tipping preferences</h3><p>Set the default amount the Teep extension pre-fills when you tip from supported social posts.</p></div>
+                    <div><h3>Tipping preferences</h3><p>Set defaults for social post tipping, including the X commands Teep can process from your connected account.</p></div>
                   </div>
                   <div className="dashboard-settings-panel-body">
-                    <div className="dashboard-settings-subcard">
-                      <h4>Extension default</h4>
-                      <p>This value is saved to the account settings API and read by the extension when an account is connected.</p>
+                    <div className="dashboard-settings-subcard dashboard-settings-x-tipping-card">
+                      <div className="dashboard-settings-preference-head">
+                        <div className="dashboard-settings-preference-title">
+                          <span className="dashboard-settings-preference-icon dashboard-settings-x-icon" aria-hidden>
+                            <svg viewBox="0 0 24 24" focusable="false">
+                              <path d="M13.7 10.6 21.2 2h-1.8l-6.5 7.5L7.7 2H1.8l7.9 11.5L1.8 22h1.8l6.9-7.5 5.6 7.5h5.9l-8.3-11.4Zm-2.4 2.6-.8-1.1L4.1 3.3h2.7l5.1 7.1.8 1.1 6.7 9.3h-2.7l-5.4-7.6Z" />
+                            </svg>
+                          </span>
+                          <div>
+                            <h4>X tipping</h4>
+                            <div className="dashboard-settings-x-tipping-indicators" aria-label="X tipping status">
+                              <span className={`dashboard-settings-status-pill ${xTippingEnabled ? "is-success" : "is-neutral"}`}>
+                                {xTippingEnabled ? "Enabled" : "Paused"}
+                              </span>
+                              <span className={`dashboard-settings-connection-indicator ${xTippingStatus?.xAccount ? "is-connected" : "is-disconnected"}`}>
+                                {xTippingStatus?.xAccount ? `@${xTippingStatus.xAccount.username}` : "Not connected"}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="dashboard-settings-preference-actions">
+                          {xTippingStatus?.xAccount ? (
+                            <button type="button" className="btn-secondary" onClick={startXTippingLink} disabled={xTippingLinking}>
+                              {xTippingLinking ? "Opening X..." : "Reconnect X"}
+                            </button>
+                          ) : (
+                            <button type="button" className="btn-secondary" onClick={startXTippingLink} disabled={xTippingLinking}>
+                              {xTippingLinking ? "Opening X..." : "Connect X"}
+                            </button>
+                          )}
+                          <button type="button" className="btn-primary" onClick={() => void saveXTippingPermissions()} disabled={xTippingLoading || xTippingSaving || !xTippingStatus?.xAccount}>
+                            {xTippingSaving ? "Saving..." : "Save X tipping"}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="dashboard-settings-command-row">
+                        <div>
+                          <strong>Allow X tip commands</strong>
+                          <span>Enable tipping directly from your X timeline using commands like <code>@teepagent tip @creator $5</code>. You must be authenticated to authorize these commands.</span>
+                        </div>
+                          <Toggle
+                            checked={xTippingEnabled}
+                            onChange={(next) => {
+                              if (next && !xTippingStatus?.xAccount) {
+                                showToast("Connect X before enabling X tipping.");
+                                return;
+                              }
+                              setXTippingEnabled(next);
+                              void saveXTippingPermissions(next);
+                            }}
+                          />
+                      </div>
+
+                      <div className="dashboard-settings-two-col dashboard-settings-two-col--wide">
+                        <div className="dashboard-settings-limit-field">
+                          <label htmlFor="x-max-per-tip">Max per tip on X</label>
+                          <div className="dashboard-settings-input-row is-readonly">
+                            <span aria-hidden>$</span>
+                            <input
+                              id="x-max-per-tip"
+                              value={xMaxPerTip}
+                              onChange={(event) => setXMaxPerTip(event.target.value.replace(/^\$/, ""))}
+                              inputMode="decimal"
+                              disabled={xTippingLoading || xTippingSaving}
+                            />
+                          </div>
+                          <p>Maximum amount allowed for a single X tip command.</p>
+                        </div>
+                        <div className="dashboard-settings-limit-field">
+                          <label htmlFor="x-max-daily">Daily tip limit on X</label>
+                          <div className="dashboard-settings-input-row is-readonly">
+                            <span aria-hidden>$</span>
+                            <input
+                              id="x-max-daily"
+                              value={xMaxDaily}
+                              onChange={(event) => setXMaxDaily(event.target.value.replace(/^\$/, ""))}
+                              inputMode="decimal"
+                              disabled={xTippingLoading || xTippingSaving}
+                            />
+                          </div>
+                          <p>Total combined value of tips allowed in a 24-hour window.</p>
+                        </div>
+                      </div>
+
+                      {!xTippingStatus?.xAccount && (
+                        <p className="dashboard-settings-status dashboard-settings-status--muted">Connect X before enabling social tip commands.</p>
+                      )}
+                    </div>
+
+                    <div className="dashboard-settings-subcard dashboard-settings-extension-card">
+                      <div className="dashboard-settings-preference-title">
+                        <span className="dashboard-settings-preference-icon material-symbols-outlined" aria-hidden>extension</span>
+                        <div>
+                          <h4>Extension default</h4>
+                          <p>Set the pre-filled amount for the browser extension popup.</p>
+                        </div>
+                      </div>
                       <div className="dashboard-settings-two-col">
                         <div className="dashboard-settings-field">
                           <label htmlFor="default-tip">Default tip amount</label>

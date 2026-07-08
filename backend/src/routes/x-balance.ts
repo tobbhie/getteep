@@ -11,6 +11,10 @@ import { isAddress } from "../utils/security";
 
 const router = Router();
 
+function dbBool(value: unknown) {
+  return value === true || value === 1;
+}
+
 function err(res: Response, status: number, message: string) {
   res.status(status).json({ error: message });
 }
@@ -48,10 +52,26 @@ router.get("/:address", async (req: Request, res: Response) => {
     .prepare(
       `SELECT enabled, max_per_tip_raw, max_daily_raw FROM x_tipping_permissions WHERE user_address = ?`
     )
-    .get(address) as { enabled: boolean; max_per_tip_raw: string; max_daily_raw: string } | undefined;
-  const xAccount = await db
+    .get(address) as { enabled: boolean | number; max_per_tip_raw: string; max_daily_raw: string } | undefined;
+  const linkedXAccount = await db
     .prepare(`SELECT x_user_id, x_username, verified_at FROM x_accounts WHERE user_address = ?`)
     .get(address) as { x_user_id: string; x_username: string; verified_at: string } | undefined;
+  const verifiedCreator = linkedXAccount
+    ? undefined
+    : (await db
+        .prepare(
+          `SELECT author_id, username, verified_at FROM verified_claims
+           WHERE owner_address = ? ORDER BY verified_at DESC LIMIT 1`
+        )
+        .get(address) as { author_id: string; username: string; verified_at: string } | undefined);
+  const xAccount = linkedXAccount
+    ?? (verifiedCreator
+      ? {
+          x_user_id: verifiedCreator.author_id,
+          x_username: verifiedCreator.username,
+          verified_at: verifiedCreator.verified_at,
+        }
+      : undefined);
 
   res.json({
     address,
@@ -63,7 +83,7 @@ router.get("/:address", async (req: Request, res: Response) => {
       ? { xUserId: xAccount.x_user_id, username: xAccount.x_username, verifiedAt: xAccount.verified_at }
       : null,
     permissions: {
-      enabled: permissions?.enabled === true,
+      enabled: permissions ? dbBool(permissions.enabled) : Boolean(xAccount),
       maxPerTipRaw: permissions?.max_per_tip_raw || process.env.X_BOT_MAX_PER_TIP_RAW || "10000000",
       maxDailyRaw: permissions?.max_daily_raw || process.env.X_BOT_MAX_DAILY_RAW || "50000000",
     },
@@ -89,7 +109,14 @@ router.post("/permissions", async (req: Request, res: Response) => {
   }
 
   const db = getDb();
-  const linked = await db.prepare(`SELECT x_user_id FROM x_accounts WHERE user_address = ?`).get(address) as
+  const linked = await db
+    .prepare(
+      `SELECT x_user_id FROM x_accounts WHERE user_address = ?
+       UNION
+       SELECT author_id AS x_user_id FROM verified_claims WHERE owner_address = ?
+       LIMIT 1`
+    )
+    .get(address, address) as
     | { x_user_id: string }
     | undefined;
   if (enabled && !linked) {

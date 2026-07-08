@@ -18,6 +18,9 @@ export default function Terms() {
       <p style={{ color: "var(--text-secondary)", lineHeight: "var(--line-relaxed)", marginBottom: "var(--space-4)" }}>
         Teep may show balances, receipts, and history from indexed blockchain activity and provider records. During beta, displayed history can lag while indexing catches up, but completed blockchain transactions remain final.
       </p>
+      <p style={{ color: "var(--text-secondary)", lineHeight: "var(--line-relaxed)", marginBottom: "var(--space-4)" }}>
+        <strong style={{ color: "var(--text-primary)" }}>X tip commands require your X connection.</strong> When you connect X for Teep commands, you authorize Teep to process commands from that connected X account within your configured limits. The default limits are $10 per tip and $50 per day, and you can pause or change them in Settings. Creating a Teep account alone does not authorize X tip commands.
+      </p>
       <p style={{ color: "var(--text-secondary)", lineHeight: "var(--line-relaxed)" }}>
         Teep is an independent product and is not affiliated with, endorsed by, or sponsored by X Corp. For support, see <Link to="/support">Support</Link>.
       </p>
