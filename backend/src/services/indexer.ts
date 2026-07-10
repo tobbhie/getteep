@@ -18,6 +18,7 @@ const CLAIM_WALLET_DEPLOYED_EVENT = parseAbiItem(
 const CHAIN = getConfiguredChain();
 const RPC_URL = getRpcUrl();
 const TIP_CONTRACT_ADDRESS = process.env.TIP_CONTRACT_ADDRESS as `0x${string}`;
+const X_TIPPING_ROUTER_ADDRESS = process.env.X_TIPPING_ROUTER_ADDRESS as `0x${string}` | undefined;
 const FACTORY_ADDRESS = process.env.FACTORY_ADDRESS as `0x${string}`;
 const POLL_INTERVAL = parseInt(process.env.POLL_INTERVAL_MS || "5000");
 const BATCH_SIZE = BigInt(process.env.INDEXER_BATCH_SIZE || "5000");
@@ -29,6 +30,14 @@ const RESCAN_BLOCKS = BigInt(process.env.INDEXER_RESCAN_BLOCKS || "100");
 const RPC_TIMEOUT_MS = parseInt(process.env.RPC_TIMEOUT_MS || "30000", 10) || 30000;
 const RESET_TO_START_ON_BOOT = process.env.INDEXER_RESET_TO_START_ON_BOOT === "true";
 const ALLOW_INSECURE_RPC_TLS = isInsecureRpcTlsEnabled();
+
+function isAddress(value?: string): value is `0x${string}` {
+  return Boolean(value && /^0x[a-fA-F0-9]{40}$/.test(value));
+}
+
+function tipEventAddresses(): `0x${string}`[] {
+  return [TIP_CONTRACT_ADDRESS, X_TIPPING_ROUTER_ADDRESS].filter(isAddress);
+}
 
 export class Indexer {
   private client;
@@ -48,6 +57,7 @@ export class Indexer {
     console.log(`[Indexer] Starting on ${CHAIN.name}, polling every ${POLL_INTERVAL}ms, RPC timeout ${RPC_TIMEOUT_MS}ms`);
     if (ALLOW_INSECURE_RPC_TLS) warnIfInsecureRpcTlsEnabled("Indexer");
     console.log(`[Indexer] TipContract: ${TIP_CONTRACT_ADDRESS}`);
+    if (isAddress(X_TIPPING_ROUTER_ADDRESS)) console.log(`[Indexer] XTippingRouter: ${X_TIPPING_ROUTER_ADDRESS}`);
     console.log(`[Indexer] Factory:     ${FACTORY_ADDRESS}`);
     console.log(`[Indexer] Start block: ${START_BLOCK}, confirmations: ${CONFIRMATIONS}, rescan blocks: ${RESCAN_BLOCKS}`);
 
@@ -121,7 +131,7 @@ export class Indexer {
 
       // Fetch tip events
       const tipLogs = await this.client.getLogs({
-        address: TIP_CONTRACT_ADDRESS,
+        address: tipEventAddresses(),
         event: TIPPED_EVENT,
         fromBlock: batchFrom,
         toBlock: batchTo,
@@ -161,7 +171,6 @@ export class Indexer {
 
   private async processTipLogs(logs: Log[]): Promise<void> {
     const db = getDb();
-    const contractAddr = (TIP_CONTRACT_ADDRESS || "").toLowerCase();
 
     const tx = db.transaction(async (txDb) => {
       for (const log of logs) {
@@ -172,6 +181,7 @@ export class Indexer {
         const contentId = args.contentId;
         const amount = args.amount.toString();
         const txHash = String(log.transactionHash).toLowerCase();
+        const contractAddr = String(log.address || "").toLowerCase();
         const result = await txDb.prepare(`
           INSERT INTO tips (content_id, author_id, from_address, to_address, amount, tx_hash, block_number, log_index, timestamp, tip_contract_address)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

@@ -4,10 +4,13 @@ import { usePrivy } from "@privy-io/react-auth";
 import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
 import { getTeepActivityTitle } from "@teep/shared";
 import { API_BASE, WEB_APP_URL } from "../config";
+import { USDC_ADDRESS } from "../config";
+import { encodeApproveCall, encodeXTippingPermissionCall, encodeXTippingRevokeCall, X_TIPPING_ROUTER_ADDRESS } from "../lib/contracts";
 import DashboardShell from "../components/DashboardShell";
 import { DashboardConnectPage, DashboardPreparingPage } from "../components/DashboardAuthState";
 
 const PAGE_SIZE = 7;
+const X_TIPPING_ALLOWANCE_DAYS = 30n;
 
 type SettingsTab = "identity" | "tipping" | "receipts" | "funding" | "grow" | "notifications" | "privacy" | "engagement" | "support";
 
@@ -675,6 +678,10 @@ export default function DashboardSettings() {
       showToast("Connect your Teep account first.");
       return;
     }
+    if (!smartWalletClient?.account) {
+      showToast("Connect your account before changing X tipping.");
+      return;
+    }
     if (nextEnabled && !xTippingStatus?.xAccount) {
       showToast("Connect X before enabling X tipping.");
       return;
@@ -693,6 +700,31 @@ export default function DashboardSettings() {
     }
     setXTippingSaving(true);
     try {
+      const hasRouter = /^0x[a-fA-F0-9]{40}$/.test(X_TIPPING_ROUTER_ADDRESS);
+      if (nextEnabled && !hasRouter) {
+        throw new Error("X tipping is not ready yet. Please try again later.");
+      }
+      if (hasRouter) {
+        if (nextEnabled) {
+          const maxDaily = BigInt(maxDailyRaw);
+          const allowanceRaw = maxDaily * X_TIPPING_ALLOWANCE_DAYS;
+          await smartWalletClient.sendTransaction({
+            account: smartWalletClient.account,
+            calls: [
+              { to: USDC_ADDRESS, data: encodeApproveCall(X_TIPPING_ROUTER_ADDRESS, allowanceRaw) },
+              { to: X_TIPPING_ROUTER_ADDRESS, data: encodeXTippingPermissionCall(true, BigInt(maxPerTipRaw), maxDaily) },
+            ],
+          } as Parameters<typeof smartWalletClient.sendTransaction>[0]);
+        } else {
+          await smartWalletClient.sendTransaction({
+            account: smartWalletClient.account,
+            calls: [
+              { to: X_TIPPING_ROUTER_ADDRESS, data: encodeXTippingRevokeCall() },
+              { to: USDC_ADDRESS, data: encodeApproveCall(X_TIPPING_ROUTER_ADDRESS, 0n) },
+            ],
+          } as Parameters<typeof smartWalletClient.sendTransaction>[0]);
+        }
+      }
       const proof = await requestWalletProof();
       const response = await fetch(`${API_BASE}/x-balance/permissions`, {
         method: "POST",
@@ -717,7 +749,7 @@ export default function DashboardSettings() {
     } finally {
       setXTippingSaving(false);
     }
-  }, [address, loadXTippingStatus, requestWalletProof, showToast, xMaxDaily, xMaxPerTip, xTippingEnabled, xTippingStatus?.xAccount]);
+  }, [address, loadXTippingStatus, requestWalletProof, showToast, smartWalletClient, xMaxDaily, xMaxPerTip, xTippingEnabled, xTippingStatus?.xAccount]);
 
   const downloadCsv = useCallback((kind: "funding" | "withdrawals") => {
     const rows = kind === "funding"

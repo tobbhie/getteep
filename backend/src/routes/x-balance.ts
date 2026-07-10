@@ -1,13 +1,15 @@
 import { Router, Request, Response } from "express";
+import { erc20Abi } from "viem";
 import { getDb } from "../db/database";
 import {
   getDefaultChainId,
   getDefaultTokenAddress,
-  getTeepBalance,
 } from "../services/teepBalance";
 import { formatUsdcRaw } from "../services/xBot/parseTipCommand";
 import { verifyWalletProof } from "../services/walletAuth";
 import { isAddress } from "../utils/security";
+import { createBackendPublicClient } from "../services/rpcClient";
+import { getOnchainXTippingReadiness } from "../services/xTippingRouter";
 
 const router = Router();
 
@@ -35,7 +37,7 @@ async function requireWallet(req: Request, res: Response, purpose: string): Prom
 
 /**
  * GET /x-balance/:address
- * Returns the user's Teep internal balance for X bot tipping.
+ * Returns the user's on-chain Teep balance and X tipping status.
  */
 router.get("/:address", async (req: Request, res: Response) => {
   const address = String(req.params.address || "").toLowerCase();
@@ -46,7 +48,18 @@ router.get("/:address", async (req: Request, res: Response) => {
 
   const tokenAddress = getDefaultTokenAddress();
   const chainId = getDefaultChainId();
-  const amountRaw = await getTeepBalance({ userAddress: address, tokenAddress, chainId });
+  let amountRaw = 0n;
+  try {
+    const publicClient = createBackendPublicClient();
+    amountRaw = await publicClient.readContract({
+      address: tokenAddress as `0x${string}`,
+      abi: erc20Abi,
+      functionName: "balanceOf",
+      args: [address as `0x${string}`],
+    });
+  } catch (error) {
+    console.warn("[x-balance] On-chain balance read failed:", error instanceof Error ? error.message : error);
+  }
   const db = getDb();
   const permissions = await db
     .prepare(
@@ -73,6 +86,12 @@ router.get("/:address", async (req: Request, res: Response) => {
         }
       : undefined);
 
+  let enabled = permissions ? dbBool(permissions.enabled) : Boolean(xAccount);
+  if (enabled) {
+    const readiness = await getOnchainXTippingReadiness({ senderAddress: address, totalRaw: 0n });
+    enabled = readiness.ok;
+  }
+
   res.json({
     address,
     tokenAddress,
@@ -83,7 +102,7 @@ router.get("/:address", async (req: Request, res: Response) => {
       ? { xUserId: xAccount.x_user_id, username: xAccount.x_username, verifiedAt: xAccount.verified_at }
       : null,
     permissions: {
-      enabled: permissions ? dbBool(permissions.enabled) : Boolean(xAccount),
+      enabled,
       maxPerTipRaw: permissions?.max_per_tip_raw || process.env.X_BOT_MAX_PER_TIP_RAW || "10000000",
       maxDailyRaw: permissions?.max_daily_raw || process.env.X_BOT_MAX_DAILY_RAW || "50000000",
     },
@@ -122,6 +141,13 @@ router.post("/permissions", async (req: Request, res: Response) => {
   if (enabled && !linked) {
     err(res, 409, "Link your X account before enabling X tipping");
     return;
+  }
+  if (enabled) {
+    const readiness = await getOnchainXTippingReadiness({ senderAddress: address, totalRaw: 0n });
+    if (!readiness.ok) {
+      err(res, 409, readiness.reason);
+      return;
+    }
   }
 
   await db.prepare(

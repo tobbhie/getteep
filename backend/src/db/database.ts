@@ -562,12 +562,17 @@ const schemaSql = `
     amount_raw TEXT NOT NULL,
     source_tweet_id TEXT NOT NULL UNIQUE,
     receipt_id TEXT NOT NULL UNIQUE,
+    tx_hash TEXT,
     status TEXT NOT NULL,
     created_at BIGINT NOT NULL
   );
 
+  ALTER TABLE x_bot_tips
+    ADD COLUMN IF NOT EXISTS tx_hash TEXT;
+
   CREATE INDEX IF NOT EXISTS idx_x_bot_tips_sender ON x_bot_tips(sender_address, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_x_bot_tips_recipient ON x_bot_tips(recipient_address, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_x_bot_tips_tx_hash ON x_bot_tips(LOWER(tx_hash));
 
   CREATE TABLE IF NOT EXISTS claimable_tips (
     id TEXT PRIMARY KEY,

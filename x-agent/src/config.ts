@@ -19,6 +19,10 @@ export const config = {
   botUsername: env("X_BOT_USERNAME", "teep_app").replace(/^@/, ""),
   bearerToken: env("X_BEARER_TOKEN"),
   botAccessToken: env("X_BOT_ACCESS_TOKEN"),
+  botRefreshToken: env("X_BOT_REFRESH_TOKEN"),
+  xClientId: env("X_CLIENT_ID"),
+  xClientSecret: env("X_CLIENT_SECRET"),
+  tokenStatePath: env("X_TOKEN_STATE_PATH", ".x-token-state.json"),
   pollIntervalMs: envInt("X_POLL_INTERVAL_MS", 45_000),
   mentionsPageSize: envInt("X_MENTIONS_PAGE_SIZE", 20),
   useFilteredStream: env("X_USE_FILTERED_STREAM") === "true",
@@ -30,6 +34,9 @@ export function assertConfig() {
   if (!config.botUserId) missing.push("X_BOT_USER_ID");
   if (!config.bearerToken) missing.push("X_BEARER_TOKEN");
   if (!config.botAccessToken) missing.push("X_BOT_ACCESS_TOKEN");
+  if (!config.botRefreshToken) missing.push("X_BOT_REFRESH_TOKEN");
+  if (!config.xClientId) missing.push("X_CLIENT_ID");
+  if (!config.xClientSecret) missing.push("X_CLIENT_SECRET");
   if (missing.length) {
     throw new Error(`x-agent missing required env: ${missing.join(", ")}`);
   }

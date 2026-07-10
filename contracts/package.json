@@ -8,6 +8,7 @@
     "deploy": "hardhat run scripts/deploy.ts --network arcTestnet",
     "deploy:local": "hardhat run scripts/deploy.ts --network localhost",
     "deploy:arc-testnet": "hardhat run scripts/deploy.ts --network arcTestnet",
+    "deploy:x-router:arc-testnet": "hardhat run scripts/deploy-x-tipping-router-only.ts --network arcTestnet",
     "deploy:defi:arc-testnet": "hardhat run scripts/deploy-defi.ts --network arcTestnet",
     "deploy:base-sepolia": "hardhat run scripts/deploy.ts --network baseSepolia",
     "deploy:mainnet": "hardhat run scripts/deploy.ts --network base",

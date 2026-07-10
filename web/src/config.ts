@@ -51,6 +51,7 @@ export const USDC_DECIMALS = 6;
 export const USDC_ADDRESS = (import.meta.env.VITE_USDC_ADDRESS || "0x3600000000000000000000000000000000000000") as `0x${string}`;
 export const FACTORY_ADDRESS = (import.meta.env.VITE_FACTORY_ADDRESS || "0xB53E8919627BcE6845eEee399E27A023D23C0dD4") as `0x${string}`;
 export const TIP_CONTRACT_ADDRESS = (import.meta.env.VITE_TIP_CONTRACT_ADDRESS || "0xc4b18D3FB3aE76b37B6dfd69E5037c5865A47886") as `0x${string}`;
+export const X_TIPPING_ROUTER_ADDRESS = (import.meta.env.VITE_X_TIPPING_ROUTER_ADDRESS || "") as `0x${string}`;
 export const REFERRAL_REGISTRY_ADDRESS = (import.meta.env.VITE_REFERRAL_REGISTRY_ADDRESS || "0x967A2Bb3Ba05D1c0F3071C2c94C02950966c3655") as `0x${string}`;
 
 /** Onramp / offramp URLs */

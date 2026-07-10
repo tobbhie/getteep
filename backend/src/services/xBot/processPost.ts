@@ -3,13 +3,11 @@ import { getDb } from "../../db/database";
 import { XOAuthService } from "../oauth";
 import {
   createReceiptId,
-  creditTeepBalance,
-  debitTeepBalance,
   getDailyXBotTipTotal,
   getDefaultChainId,
   getDefaultTokenAddress,
-  getTeepBalance,
 } from "../teepBalance";
+import { getOnchainTeepBalance, getOnchainXTippingReadiness, relayXTip } from "../xTippingRouter";
 import { amountToRaw, formatUsdcRaw, parseTipCommand } from "./parseTipCommand";
 import {
   buildBalanceReply,
@@ -26,7 +24,6 @@ import type { ProcessPostResult, TipIntent, XIncomingPost } from "./types";
 const MIN_TIP_RAW = BigInt(process.env.X_BOT_MIN_TIP_RAW || "10000");
 const PROCESSING_STALE_MS = Number(process.env.X_BOT_PROCESSING_STALE_MS || "300000");
 const BOT_USER_ID = process.env.X_BOT_USER_ID || "";
-const CLAIMABLE_TIP_TTL_MS = Number(process.env.X_BOT_CLAIMABLE_TTL_MS || String(90 * 24 * 60 * 60 * 1000));
 const oauthService = new XOAuthService();
 
 type SenderAccount = {
@@ -96,21 +93,6 @@ async function resolveSender(authorId: string): Promise<SenderAccount | null> {
     .get(authorId) as { user_address: string; x_username: string } | undefined;
   if (!row) return null;
   return { userAddress: row.user_address.toLowerCase(), xUsername: row.x_username };
-}
-
-async function ensureDefaultTippingPermission(userAddress: string) {
-  const db = getDb();
-  const tokenAddress = getDefaultTokenAddress();
-  await db.prepare(
-    `INSERT INTO x_tipping_permissions (user_address, enabled, token_address, max_per_tip_raw, max_daily_raw, updated_at)
-     VALUES (?, TRUE, ?, ?, ?, now())
-     ON CONFLICT(user_address) DO NOTHING`
-  ).run(
-    userAddress.toLowerCase(),
-    tokenAddress,
-    process.env.X_BOT_MAX_PER_TIP_RAW || "10000000",
-    process.env.X_BOT_MAX_DAILY_RAW || "50000000"
-  );
 }
 
 async function resolveRecipient(intent: TipIntent, post: XIncomingPost): Promise<RecipientAccount | null> {
@@ -227,14 +209,8 @@ async function validateBatch(params: {
     };
   }
 
-  const balance = await getTeepBalance({
-    userAddress: params.senderAddress,
-    tokenAddress: params.tokenAddress,
-    chainId,
-  });
-  if (balance < totalRaw) {
-    return { ok: false as const, code: "INSUFFICIENT_BALANCE", reason: "Insufficient Teep balance." };
-  }
+  const onchain = await getOnchainXTippingReadiness({ senderAddress: params.senderAddress, totalRaw });
+  if (!onchain.ok) return onchain;
 
   return { ok: true as const };
 }
@@ -291,11 +267,7 @@ export async function processIncomingPost(post: XIncomingPost): Promise<ProcessP
       await markProcessed(post.id, post.authorId, "failed", "SENDER_NOT_REGISTERED");
       return { tweetId: post.id, status: "failed", code: "SENDER_NOT_REGISTERED", replyText };
     }
-    const balance = await getTeepBalance({
-      userAddress: sender.userAddress,
-      tokenAddress: getDefaultTokenAddress(),
-      chainId: getDefaultChainId(),
-    });
+    const balance = await getOnchainTeepBalance(sender.userAddress);
     const replyText = buildBalanceReply(sender.xUsername, balance);
     await markProcessed(post.id, post.authorId, "completed", "BALANCE");
     return { tweetId: post.id, status: "completed", replyText };
@@ -307,7 +279,11 @@ export async function processIncomingPost(post: XIncomingPost): Promise<ProcessP
     await markProcessed(post.id, post.authorId, "failed", "SENDER_NOT_REGISTERED");
     return { tweetId: post.id, status: "failed", code: "SENDER_NOT_REGISTERED", replyText };
   }
-  await ensureDefaultTippingPermission(sender.userAddress);
+  if (command.tips.length > 1) {
+    const replyText = buildFailureReply("Send one X tip command at a time.");
+    await markProcessed(post.id, post.authorId, "failed", "BATCH_NOT_SUPPORTED");
+    return { tweetId: post.id, status: "failed", code: "BATCH_NOT_SUPPORTED", replyText };
+  }
 
   const tokenAddress = getDefaultTokenAddress();
   const chainId = getDefaultChainId();
@@ -358,79 +334,57 @@ export async function processIncomingPost(post: XIncomingPost): Promise<ProcessP
   }
 
   try {
-    await db.transaction(async (txDb) => {
-      for (const tip of prepared) {
-        if (tip.recipient.userAddress) {
-          await debitTeepBalance({
-            userAddress: sender.userAddress,
-            amountRaw: tip.amountRaw,
-            tokenAddress,
-            chainId,
-            reason: "x_bot_tip",
-            refId: tip.sourceTweetId,
-          }, txDb.client);
-          await creditTeepBalance({
-            userAddress: tip.recipient.userAddress,
-            amountRaw: tip.amountRaw,
-            tokenAddress,
-            chainId,
-            reason: "x_bot_tip",
-            refId: tip.sourceTweetId,
-          }, txDb.client);
-          await txDb.prepare(
-            `INSERT INTO x_bot_tips (
-              id, sender_address, recipient_address, recipient_x_user_id, recipient_x_username,
-              token_address, amount_raw, source_tweet_id, receipt_id, status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?)`
-          ).run(
-            tip.tipId,
-            sender.userAddress,
-            tip.recipient.userAddress,
-            tip.recipient.xUserId,
-            tip.recipient.xUsername,
-            tokenAddress,
-            tip.amountRaw.toString(),
-            tip.sourceTweetId,
-            tip.receiptId,
-            nowMs()
-          );
-          continue;
-        }
+    const relayed: Array<PreparedTip & { txHash: string; claimWallet: string; contentId: string }> = [];
+    for (const tip of prepared) {
+      const result = await relayXTip({
+        senderAddress: sender.userAddress,
+        recipientXUserId: tip.recipient.xUserId,
+        sourceTweetId: tip.sourceTweetId,
+        amountRaw: tip.amountRaw,
+      });
+      relayed.push({ ...tip, txHash: result.txHash, claimWallet: result.claimWallet, contentId: result.contentId });
+    }
 
-        await debitTeepBalance({
-          userAddress: sender.userAddress,
-          tokenAddress,
-          chainId,
-          amountRaw: tip.amountRaw,
-          reason: "x_bot_claimable",
-          refId: tip.sourceTweetId,
-        }, txDb.client);
+    await db.transaction(async (txDb) => {
+      for (const tip of relayed) {
         await txDb.prepare(
-          `INSERT INTO claimable_tips (
-            id, recipient_x_user_id, recipient_x_username, sender_address,
-            token_address, amount_raw, source_tweet_id, receipt_id, status, expires_at, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'unclaimed', ?, ?)`
+          `INSERT INTO tip_metadata (content_id, author_handle, tweet_id, kind)
+           VALUES (?, ?, ?, 'x_bot_tip')
+           ON CONFLICT(content_id) DO UPDATE SET
+             author_handle = excluded.author_handle,
+             tweet_id = excluded.tweet_id,
+             kind = excluded.kind`
+        ).run(tip.contentId, tip.recipient.xUsername, tip.sourceTweetId);
+        await txDb.prepare(
+          `INSERT INTO x_bot_tips (
+            id, sender_address, recipient_address, recipient_x_user_id, recipient_x_username,
+            token_address, amount_raw, source_tweet_id, receipt_id, tx_hash, status, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?)
+          ON CONFLICT(source_tweet_id) DO UPDATE SET
+            tx_hash = excluded.tx_hash,
+            status = excluded.status`
         ).run(
           tip.tipId,
+          sender.userAddress,
+          tip.claimWallet,
           tip.recipient.xUserId,
           tip.recipient.xUsername,
-          sender.userAddress,
           tokenAddress,
           tip.amountRaw.toString(),
           tip.sourceTweetId,
           tip.receiptId,
-          nowMs() + CLAIMABLE_TIP_TTL_MS,
+          tip.txHash,
           nowMs()
         );
       }
     })();
 
-    const completed = prepared.filter((tip) => tip.recipient.userAddress);
-    const reserved = prepared.filter((tip) => !tip.recipient.userAddress);
-    const firstReceiptId = prepared[0]?.receiptId;
+    const completed = relayed.filter((tip) => tip.recipient.userAddress);
+    const reserved = relayed.filter((tip) => !tip.recipient.userAddress);
+    const firstReceiptId = relayed[0]?.receiptId;
 
-    if (prepared.length === 1) {
-      const only = prepared[0];
+    if (relayed.length === 1) {
+      const only = relayed[0];
       const replyText = only.recipient.userAddress
         ? buildSuccessReply({
             senderHandle: sender.xUsername,

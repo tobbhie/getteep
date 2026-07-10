@@ -1,5 +1,5 @@
 import { encodeFunctionData, keccak256, toBytes } from "viem";
-import { USDC_ADDRESS, TIP_CONTRACT_ADDRESS } from "../config";
+import { USDC_ADDRESS, TIP_CONTRACT_ADDRESS, X_TIPPING_ROUTER_ADDRESS } from "../config";
 
 const CLAIM_WALLET_ABI = [
   {
@@ -89,6 +89,10 @@ const TIP_ABI = [
 const USDC_APPROVE_ABI = [
   { name: "approve", type: "function", stateMutability: "nonpayable", inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }], outputs: [{ type: "bool" }] },
 ] as const;
+const X_TIPPING_ROUTER_ABI = [
+  { name: "setPermission", type: "function", stateMutability: "nonpayable", inputs: [{ name: "enabled", type: "bool" }, { name: "maxPerTip", type: "uint256" }, { name: "maxDaily", type: "uint256" }], outputs: [] },
+  { name: "revokePermission", type: "function", stateMutability: "nonpayable", inputs: [], outputs: [] },
+] as const;
 const USDC_TRANSFER_ABI = [
   { name: "transfer", type: "function", stateMutability: "nonpayable", inputs: [{ name: "to", type: "address" }, { name: "amount", type: "uint256" }], outputs: [{ type: "bool" }] },
 ] as const;
@@ -110,4 +114,20 @@ export function encodeTransferCall(to: `0x${string}`, amountRaw: bigint): `0x${s
   });
 }
 
-export { TIP_CONTRACT_ADDRESS };
+export function encodeXTippingPermissionCall(enabled: boolean, maxPerTipRaw: bigint, maxDailyRaw: bigint): `0x${string}` {
+  return encodeFunctionData({
+    abi: X_TIPPING_ROUTER_ABI,
+    functionName: "setPermission",
+    args: [enabled, maxPerTipRaw, maxDailyRaw],
+  });
+}
+
+export function encodeXTippingRevokeCall(): `0x${string}` {
+  return encodeFunctionData({
+    abi: X_TIPPING_ROUTER_ABI,
+    functionName: "revokePermission",
+    args: [],
+  });
+}
+
+export { TIP_CONTRACT_ADDRESS, X_TIPPING_ROUTER_ADDRESS };

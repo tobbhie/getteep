@@ -340,9 +340,8 @@ router.get("/x/callback", async (req: Request, res: Response) => {
       const maxDailyRaw = process.env.X_BOT_MAX_DAILY_RAW || "50000000";
       await db.prepare(
         `INSERT INTO x_tipping_permissions (user_address, enabled, token_address, max_per_tip_raw, max_daily_raw, updated_at)
-         VALUES (?, true, ?, ?, ?, now())
+         VALUES (?, false, ?, ?, ?, now())
          ON CONFLICT(user_address) DO UPDATE SET
-           enabled = TRUE,
            token_address = excluded.token_address,
            updated_at = now()`
       ).run(
@@ -359,7 +358,7 @@ router.get("/x/callback", async (req: Request, res: Response) => {
 
       res.setHeader("Content-Type", "text/html");
       res.send(`<!DOCTYPE html>
-<html><head><title>Teep - X Tipping Active</title>
+<html><head><title>Teep - X Connected</title>
 <style>
   body { background: #0a0a0a; color: #e5e5e5; font-family: -apple-system, system-ui, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
   .card { text-align: center; padding: 40px; background: #111; border-radius: 16px; border: 1px solid #1a1a2e; max-width: 420px; }
@@ -370,9 +369,9 @@ router.get("/x/callback", async (req: Request, res: Response) => {
   .button { display: inline-flex; align-items: center; justify-content: center; margin-top: 18px; padding: 12px 18px; border-radius: 12px; background: #6d28d9; color: #fff; font-weight: 800; text-decoration: none; }
 </style></head><body>
 <div class="card">
-  <h1>X tipping is active</h1>
-  <p><span class="handle">@${escapeHtml(profile.username)}</span> is connected. You can now tip from X using <strong>@teepagent tip @username $5</strong>.</p>
-  <p class="limits">Default safety limits are active: up to ${escapeHtml(formatUsdcRaw(BigInt(maxPerTipRaw)))} per tip and ${escapeHtml(formatUsdcRaw(BigInt(maxDailyRaw)))} per day. You can pause or change this anytime in Settings.</p>
+  <h1>X connected</h1>
+  <p><span class="handle">@${escapeHtml(profile.username)}</span> is connected. Return to Teep to activate X tip commands.</p>
+  <p class="limits">Default safety limits: up to ${escapeHtml(formatUsdcRaw(BigInt(maxPerTipRaw)))} per tip and ${escapeHtml(formatUsdcRaw(BigInt(maxDailyRaw)))} per day. You can pause or change this anytime in Settings.</p>
   ${flow.returnTo ? `<a class="button" href="${escapeHtml(flow.returnTo)}">Return to Teep</a>` : ""}
 </div>
 </body></html>`);

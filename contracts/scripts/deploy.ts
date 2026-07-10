@@ -17,6 +17,7 @@ async function main() {
   const FEE_BPS = parseInt(process.env.WITHDRAWAL_FEE_BPS || "500", 10);
   const REFERRER_SHARE_BPS = parseInt(process.env.REFERRER_SHARE_BPS || "3000", 10);
   const REFERRER_SIGNER = process.env.REFERRAL_SIGNER_ADDRESS || ATTESTATION_SIGNER;
+  const X_TIPPING_RELAYER = process.env.X_TIPPING_RELAYER_ADDRESS || deployer.address;
 
   // Determine USDC address based on network
   let usdcAddress: string;
@@ -82,6 +83,15 @@ async function main() {
   const tipAddress = await tipContract.getAddress();
   console.log("   TipContract deployed to:", tipAddress);
 
+  // 5. Deploy XTippingRouter
+  console.log("\n5. Deploying XTippingRouter...");
+  const XTippingRouter = await ethers.getContractFactory("XTippingRouter");
+  const xTippingRouter = await XTippingRouter.deploy(usdcAddress, factoryAddress, X_TIPPING_RELAYER);
+  await xTippingRouter.waitForDeployment();
+  const xTippingRouterAddress = await xTippingRouter.getAddress();
+  console.log("   XTippingRouter deployed to:", xTippingRouterAddress);
+  console.log("   X tipping relayer:", X_TIPPING_RELAYER);
+
   // Summary
   console.log("\n=== Deployment Summary ===");
   console.log("Network:          ", network);
@@ -90,6 +100,7 @@ async function main() {
   console.log("WalletFactory:   ", factoryAddress);
   console.log("ReferralRegistry:", registryAddress);
   console.log("TipContract:     ", tipAddress);
+  console.log("XTippingRouter:  ", xTippingRouterAddress);
   console.log("Att. Signer:     ", ATTESTATION_SIGNER);
   console.log("==========================\n");
 
@@ -102,6 +113,8 @@ async function main() {
     walletFactory: factoryAddress,
     referralRegistry: registryAddress,
     tipContract: tipAddress,
+    xTippingRouter: xTippingRouterAddress,
+    xTippingRelayer: X_TIPPING_RELAYER,
     attestationSigner: ATTESTATION_SIGNER,
     isTestnet: network !== "base",
     deployedAt: new Date().toISOString(),
