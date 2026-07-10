@@ -10,6 +10,7 @@ import Terms from "./pages/Terms";
 import Privacy from "./pages/Privacy";
 import Support from "./pages/Support";
 import Leaderboard from "./pages/Leaderboard";
+import FundAccount from "./pages/FundAccount";
 import Dashboard from "./pages/Dashboard";
 import DashboardWithdraw from "./pages/DashboardWithdraw";
 import DashboardDiscover from "./pages/DashboardDiscover";
@@ -36,6 +37,7 @@ const RESERVED_TOP_LEVEL_ROUTES = new Set([
   "defi",
   "faucet",
   "fees",
+  "fund",
   "health",
   "leaderboard",
   "milestones",
@@ -165,6 +167,7 @@ export default function App() {
         <Route path="/terms" element={<Terms />} />
         <Route path="/privacy" element={<Privacy />} />
         <Route path="/support" element={<Support />} />
+        <Route path="/fund" element={<FundAccount />} />
         <Route path="/leaderboard" element={<Leaderboard />} />
         <Route path="/ops" element={<AdminOps />} />
         <Route path="/ops/dashboard" element={<AdminOps />} />

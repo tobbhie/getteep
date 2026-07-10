@@ -54,7 +54,7 @@ export function buildConnectReply(handle?: string, context?: IntentReplyContext)
 }
 
 export function buildInsufficientBalanceReply(handle?: string) {
-  const who = handle ? `@${handle.replace(/^@/, "")}` : "Your";
+  const who = handle ? `@${handle.replace(/^@/, "")}, your` : "Your";
   return [
     "Couldn't send this tip yet.",
     "",

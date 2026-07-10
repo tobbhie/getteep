@@ -83,19 +83,19 @@ async function markProcessed(
 
 async function resolveSender(authorId: string): Promise<SenderAccount | null> {
   const db = getDb();
-  const row = await db
-    .prepare(`SELECT user_address, x_username FROM x_accounts WHERE x_user_id = ?`)
-    .get(authorId) as { user_address: string; x_username: string } | undefined;
-  if (row) return { userAddress: row.user_address.toLowerCase(), xUsername: row.x_username };
-
   const claim = await db
     .prepare(
       `SELECT owner_address, username FROM verified_claims
        WHERE author_id = ? ORDER BY verified_at DESC LIMIT 1`
     )
     .get(authorId) as { owner_address: string; username: string } | undefined;
-  if (!claim) return null;
-  return { userAddress: claim.owner_address.toLowerCase(), xUsername: claim.username };
+  if (claim) return { userAddress: claim.owner_address.toLowerCase(), xUsername: claim.username };
+
+  const row = await db
+    .prepare(`SELECT user_address, x_username FROM x_accounts WHERE x_user_id = ?`)
+    .get(authorId) as { user_address: string; x_username: string } | undefined;
+  if (!row) return null;
+  return { userAddress: row.user_address.toLowerCase(), xUsername: row.x_username };
 }
 
 async function ensureDefaultTippingPermission(userAddress: string) {
