@@ -15186,16 +15186,44 @@ a.creator-public-supporter-card:hover {
 
 /* X bot public intent pages */
 .x-tip-link-page {
-  min-height: calc(100vh - 88px);
+  min-height: 100vh;
   display: grid;
-  align-content: center;
+  grid-template-rows: auto 1fr;
   justify-items: center;
   gap: var(--space-6);
-  padding: clamp(40px, 8vw, 96px) var(--space-4);
+  padding: 0 var(--space-4) clamp(40px, 8vw, 96px);
   background:
-    radial-gradient(circle at 50% 10%, rgba(99, 36, 235, 0.16), transparent 34rem),
-    var(--bg-page);
+    radial-gradient(circle at 50% 8%, rgba(99, 36, 235, 0.18), transparent 34rem),
+    #000;
   color: var(--text-primary);
+}
+
+.x-tip-link-topbar {
+  width: 100%;
+  max-width: 92rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px clamp(0px, 2vw, 20px);
+}
+
+.x-tip-link-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-primary);
+  text-decoration: none;
+  font-weight: 850;
+  font-size: clamp(1.25rem, 2.5vw, 1.6rem);
+}
+
+.x-tip-link-brand:hover {
+  color: var(--text-primary);
+}
+
+.x-tip-link-brand img {
+  width: 42px;
+  height: 42px;
 }
 
 .x-tip-link-page--fund {
@@ -15204,13 +15232,59 @@ a.creator-public-supporter-card:hover {
 
 .x-tip-link-hero,
 .x-tip-link-card {
-  width: min(100%, 42rem);
+  width: min(100%, 58rem);
 }
 
 .x-tip-link-hero {
   display: grid;
+  align-content: center;
+  justify-items: center;
   gap: var(--space-5);
   text-align: center;
+}
+
+.x-tip-link-hero--claim {
+  min-height: min(760px, calc(100vh - 110px));
+}
+
+.x-tip-link-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
+  border: 1px solid rgba(167, 139, 250, 0.34);
+  border-radius: var(--radius-full);
+  background: rgba(167, 139, 250, 0.1);
+  color: var(--accent-light);
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.x-tip-link-avatar {
+  width: 96px;
+  height: 96px;
+  border-radius: var(--radius-full);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(145deg, rgba(99, 36, 235, 0.35), rgba(12, 12, 14, 0.95));
+  border: 1px solid rgba(205, 189, 255, 0.28);
+  box-shadow: 0 18px 54px rgba(99, 36, 235, 0.22);
+}
+
+.x-tip-link-avatar span {
+  width: 72px;
+  height: 72px;
+  border-radius: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(99, 36, 235, 0.55);
+  color: #fff;
+  font-size: 1.6rem;
+  font-weight: 900;
 }
 
 .x-tip-link-hero h1,
@@ -15241,9 +15315,19 @@ a.creator-public-supporter-card:hover {
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.32);
 }
 
+.x-tip-link-panel {
+  width: min(100%, 42rem);
+  display: grid;
+  gap: var(--space-4);
+  padding: clamp(18px, 4vw, 28px);
+  border: 1px solid rgba(205, 189, 255, 0.12);
+  border-radius: var(--radius-xl);
+  background: rgba(31, 28, 43, 0.72);
+}
+
 .x-tip-link-summary {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
   gap: var(--space-3);
   width: 100%;
 }
@@ -15269,6 +15353,7 @@ a.creator-public-supporter-card:hover {
 .x-tip-link-summary strong {
   color: var(--text-primary);
   font-size: 1.1rem;
+  overflow-wrap: anywhere;
 }
 
 .x-tip-link-primary {
@@ -15286,9 +15371,18 @@ a.creator-public-supporter-card:hover {
 
 @media (max-width: 640px) {
   .x-tip-link-page {
-    min-height: calc(100vh - 76px);
+    min-height: 100vh;
+    padding-bottom: var(--space-8);
+  }
+
+  .x-tip-link-topbar {
+    padding: 20px 0 4px;
+  }
+
+  .x-tip-link-hero--claim {
+    min-height: auto;
     align-content: start;
-    padding-top: var(--space-8);
+    padding-top: var(--space-5);
   }
 
   .x-tip-link-summary {

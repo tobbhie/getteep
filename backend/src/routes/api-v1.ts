@@ -44,8 +44,12 @@ async function resolveAuthorId(db: ReturnType<typeof getDb>, ownerAddress: strin
   const claim = await db
     .prepare("SELECT author_id, username FROM verified_claims WHERE owner_address = ? ORDER BY verified_at DESC LIMIT 1")
     .get(ownerAddress) as { author_id: string; username: string } | undefined;
-  if (!claim) return null;
-  return claim.author_id;
+  if (claim) return claim.author_id;
+
+  const linkedXAccount = await db
+    .prepare("SELECT x_user_id FROM x_accounts WHERE user_address = ? ORDER BY verified_at DESC LIMIT 1")
+    .get(ownerAddress) as { x_user_id: string } | undefined;
+  return linkedXAccount?.x_user_id ?? null;
 }
 
 function creatorTipPredicate(alias = "t"): string {

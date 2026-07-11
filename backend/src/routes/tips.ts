@@ -443,6 +443,8 @@ router.get("/receipt/:txHash", async (req: Request, res: Response) => {
     authorId: row.author_id,
     contentId: row.content_id,
     authorHandle: creatorUsername || row.author_handle,
+    recipientHandle: creatorUsername || row.author_handle,
+    tweetAuthorHandle: row.author_handle || creatorUsername || null,
     tweetId: row.tweet_id,
     kind: row.kind || "post_tip",
     creatorClaimStatus: verifiedCreator ? "verified" : "unclaimed",

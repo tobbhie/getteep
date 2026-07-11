@@ -59,6 +59,42 @@ function normalizeHandle(handle?: string) {
   return handle?.replace(/^@/, "").toLowerCase();
 }
 
+async function ensureVerifiedClaimFromLinkedXAccount(params: {
+  xUserId: string;
+  xUsername: string;
+  displayName?: string | null;
+  profileImageUrl?: string | null;
+  userAddress: string;
+}) {
+  const db = getDb();
+  const ownerAddress = params.userAddress.toLowerCase();
+  const existingClaim = await db
+    .prepare(`SELECT owner_address FROM verified_claims WHERE author_id = ? ORDER BY verified_at DESC LIMIT 1`)
+    .get(params.xUserId) as { owner_address: string } | undefined;
+
+  if (existingClaim && existingClaim.owner_address.toLowerCase() !== ownerAddress) {
+    return;
+  }
+
+  await db
+    .prepare(
+      `INSERT INTO verified_claims (author_id, username, display_name, owner_address, profile_image_url)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(author_id, owner_address) DO UPDATE SET
+         username = excluded.username,
+         display_name = COALESCE(excluded.display_name, verified_claims.display_name),
+         profile_image_url = COALESCE(excluded.profile_image_url, verified_claims.profile_image_url),
+         verified_at = now()`
+    )
+    .run(
+      params.xUserId,
+      params.xUsername,
+      params.displayName ?? null,
+      ownerAddress,
+      params.profileImageUrl ?? null
+    );
+}
+
 async function markProcessed(
   tweetId: string,
   authorXUserId: string,
@@ -120,6 +156,15 @@ async function resolveRecipient(intent: TipIntent, post: XIncomingPost): Promise
       const linked = await db
         .prepare(`SELECT user_address FROM x_accounts WHERE x_user_id = ?`)
         .get(profile.id) as { user_address: string } | undefined;
+      if (linked?.user_address) {
+        await ensureVerifiedClaimFromLinkedXAccount({
+          xUserId: profile.id,
+          xUsername: profile.username,
+          displayName: profile.name,
+          profileImageUrl: profile.profile_image_url ?? null,
+          userAddress: linked.user_address,
+        });
+      }
       return {
         userAddress: linked?.user_address?.toLowerCase() ?? null,
         xUserId: profile.id,
@@ -139,6 +184,13 @@ async function resolveRecipient(intent: TipIntent, post: XIncomingPost): Promise
       : (await db
           .prepare(`SELECT user_address, x_username FROM x_accounts WHERE x_user_id = ?`)
           .get(post.parentAuthorId) as { user_address: string; x_username: string } | undefined);
+    if (!claim && linked?.user_address) {
+      await ensureVerifiedClaimFromLinkedXAccount({
+        xUserId: post.parentAuthorId,
+        xUsername: linked.x_username ?? post.parentAuthorUsername,
+        userAddress: linked.user_address,
+      });
+    }
     return {
       userAddress: claim?.owner_address?.toLowerCase() ?? linked?.user_address?.toLowerCase() ?? null,
       xUserId: post.parentAuthorId,

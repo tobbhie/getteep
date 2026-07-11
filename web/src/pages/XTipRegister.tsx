@@ -6,7 +6,7 @@ import { API_BASE } from "../config";
 
 type ClaimStatus = {
   verified: boolean;
-  claims?: Array<{ username: string }>;
+  claims?: Array<{ username: string; display_name?: string | null; profile_image_url?: string | null }>;
 };
 
 function cleanHandle(value: string | null) {
@@ -34,6 +34,22 @@ function appendParams(path: string, params: URLSearchParams) {
 
 function shortAddress(address: string) {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
+
+function privyDisplayName(user: unknown, fallbackAddress: string) {
+  const candidate = user as {
+    email?: { address?: string | null } | null;
+    google?: { email?: string | null; name?: string | null } | null;
+    twitter?: { username?: string | null; name?: string | null } | null;
+  } | null;
+  return (
+    candidate?.twitter?.username ||
+    candidate?.twitter?.name ||
+    candidate?.google?.name ||
+    candidate?.google?.email ||
+    candidate?.email?.address ||
+    (fallbackAddress ? shortAddress(fallbackAddress) : "your Teep account")
+  );
 }
 
 export default function XTipRegister() {
@@ -74,6 +90,11 @@ export default function XTipRegister() {
     if (!recipient || !claimStatus?.claims?.length) return false;
     return claimStatus.claims.some((claim) => cleanHandle(claim.username) === recipient);
   }, [claimStatus, recipient]);
+  const matchingClaim = useMemo(() => {
+    if (!recipient || !claimStatus?.claims?.length) return null;
+    return claimStatus.claims.find((claim) => cleanHandle(claim.username) === recipient) || null;
+  }, [claimStatus, recipient]);
+  const signedInName = matchingClaim?.display_name || (matchingClaim?.username ? `@${matchingClaim.username}` : privyDisplayName(user, address));
 
   const shareText = isTipIntent
     ? `@${recipient}, you have a $${amount} tip waiting on Teep. Claim it here: ${window.location.href}`
@@ -83,6 +104,12 @@ export default function XTipRegister() {
   if (!ready) {
     return (
       <main className="x-tip-link-page">
+        <header className="x-tip-link-topbar">
+          <Link to="/" className="x-tip-link-brand">
+            <img src="/logo.svg" alt="" />
+            <span>Teep</span>
+          </Link>
+        </header>
         <section className="x-tip-link-card">
           <p className="eyebrow">Teep claim link</p>
           <h1>Preparing this tip.</h1>
@@ -94,6 +121,12 @@ export default function XTipRegister() {
   if (!isTipIntent) {
     return (
       <main className="x-tip-link-page">
+        <header className="x-tip-link-topbar">
+          <Link to="/" className="x-tip-link-brand">
+            <img src="/logo.svg" alt="" />
+            <span>Teep</span>
+          </Link>
+        </header>
         <section className="x-tip-link-card">
           <p className="eyebrow">Teep claim link</p>
           <h1>This link is incomplete.</h1>
@@ -107,15 +140,37 @@ export default function XTipRegister() {
   if (!authenticated) {
     return (
       <main className="x-tip-link-page">
-        <section className="x-tip-link-hero">
-          <p className="eyebrow">Tip waiting</p>
-          <h1>Claim ${amount} sent to @{recipient}</h1>
-          <p>
-            This link is for @{recipient}. Sign in, then connect that X account to make the tip available in Teep.
-          </p>
-          <button type="button" onClick={login} className="btn-primary x-tip-link-primary">
-            Continue to claim
-          </button>
+        <header className="x-tip-link-topbar">
+          <Link to="/" className="x-tip-link-brand">
+            <img src="/logo.svg" alt="" />
+            <span>Teep</span>
+          </Link>
+        </header>
+        <section className="x-tip-link-hero x-tip-link-hero--claim">
+          <span className="x-tip-link-badge">Tip waiting</span>
+          <div className="x-tip-link-avatar" aria-hidden>
+            <span>@</span>
+          </div>
+          <h1>${amount} is reserved for @{recipient}</h1>
+          <p>This tip is waiting for @{recipient}. Continue with Teep, then connect that X account to claim it.</p>
+          <div className="x-tip-link-panel">
+            <div className="x-tip-link-summary" aria-label="Reserved tip details">
+              <div>
+                <span>Recipient</span>
+                <strong>@{recipient}</strong>
+              </div>
+              <div>
+                <span>Tip amount</span>
+                <strong>${amount}</strong>
+              </div>
+            </div>
+            <button type="button" onClick={login} className="btn-primary x-tip-link-primary">
+              I am this creator
+            </button>
+            <a href={shareUrl} target="_blank" rel="noopener noreferrer" className="btn-secondary x-tip-link-primary">
+              Share link
+            </a>
+          </div>
         </section>
       </main>
     );
@@ -123,37 +178,52 @@ export default function XTipRegister() {
 
   return (
     <main className="x-tip-link-page">
-      <section className="x-tip-link-hero">
-        <p className="eyebrow">Tip waiting</p>
+      <header className="x-tip-link-topbar">
+        <Link to="/" className="x-tip-link-brand">
+          <img src="/logo.svg" alt="" />
+          <span>Teep</span>
+        </Link>
+      </header>
+      <section className="x-tip-link-hero x-tip-link-hero--claim">
+        <span className="x-tip-link-badge">Tip waiting</span>
+        <div className="x-tip-link-avatar" aria-hidden>
+          <span>{recipient.slice(0, 2).toUpperCase()}</span>
+        </div>
         <h1>${amount} is reserved for @{recipient}</h1>
         {linkedRecipient ? (
           <p>
-            You are signed in as the matching creator account. Finish the claim flow to make this tip available.
+            You are signed in as {signedInName}. Finish the claim flow to make this tip available.
           </p>
         ) : (
           <p>
-            You are signed in{address ? ` as ${shortAddress(address)}` : ""}. This claim link is for @{recipient}. If that is not you, share the link with them.
+            You are signed in as {signedInName}. This claim link is for @{recipient}. If that is not you, share the link with them.
           </p>
         )}
 
-        <div className="x-tip-link-summary" aria-label="Reserved tip details">
-          <div>
-            <span>Recipient</span>
-            <strong>@{recipient}</strong>
+        <div className="x-tip-link-panel">
+          <div className="x-tip-link-summary" aria-label="Reserved tip details">
+            <div>
+              <span>Recipient</span>
+              <strong>@{recipient}</strong>
+            </div>
+            <div>
+              <span>Signed in as</span>
+              <strong>{signedInName}</strong>
+            </div>
+            <div>
+              <span>Tip amount</span>
+              <strong>${amount}</strong>
+            </div>
           </div>
-          <div>
-            <span>Reserved tip</span>
-            <strong>${amount}</strong>
-          </div>
-        </div>
 
-        <div className="x-tip-link-actions">
-          <Link to={claimPath} className="btn-primary">
-            {linkedRecipient ? "Finish claim" : "I am this creator"}
-          </Link>
-          <a href={shareUrl} target="_blank" rel="noopener noreferrer" className="btn-secondary">
-            Share with @{recipient}
-          </a>
+          <div className="x-tip-link-actions">
+            <Link to={claimPath} className="btn-primary">
+              {linkedRecipient ? "Finish claim" : "I am this creator"}
+            </Link>
+            <a href={shareUrl} target="_blank" rel="noopener noreferrer" className="btn-secondary">
+              Share with @{recipient}
+            </a>
+          </div>
         </div>
       </section>
     </main>

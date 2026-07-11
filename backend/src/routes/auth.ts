@@ -300,10 +300,11 @@ router.get("/x/callback", async (req: Request, res: Response) => {
 
     if (flow.mode === "x_tipping") {
       const ownerAddress = flow.ownerAddress.toLowerCase();
+      const authorIdForDb = authorId;
       const existingLink = await db
         .prepare(`SELECT user_address FROM x_accounts WHERE x_user_id = ?`)
         .get(profile.id) as { user_address: string } | undefined;
-      if (existingLink && existingLink.user_address !== ownerAddress) {
+      if (existingLink && existingLink.user_address.toLowerCase() !== ownerAddress) {
         res.status(409).send(`
           <html><body style="font-family:system-ui;padding:2rem;text-align:center;">
             <h2>This X account is already linked</h2>
@@ -326,6 +327,19 @@ router.get("/x/callback", async (req: Request, res: Response) => {
         return;
       }
 
+      const existingClaim = await db.prepare(
+        "SELECT owner_address FROM verified_claims WHERE author_id = ? ORDER BY verified_at DESC LIMIT 1"
+      ).get(authorIdForDb) as { owner_address: string } | undefined;
+      if (existingClaim && existingClaim.owner_address.toLowerCase() !== ownerAddress) {
+        res.status(409).send(`
+          <html><body style="font-family:system-ui;padding:2rem;text-align:center;">
+            <h2>This X account is already linked</h2>
+            <p>@${escapeHtml(profile.username)} is already linked to another Teep account.</p>
+          </body></html>
+        `);
+        return;
+      }
+
       await db.prepare(
         `INSERT INTO x_accounts (x_user_id, user_address, x_username, verified_at)
          VALUES (?, ?, ?, now())
@@ -334,6 +348,15 @@ router.get("/x/callback", async (req: Request, res: Response) => {
            x_username = excluded.x_username,
            verified_at = now()`
       ).run(profile.id, ownerAddress, profile.username);
+      await db.prepare(
+        `INSERT INTO verified_claims (author_id, username, display_name, owner_address, profile_image_url)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(author_id, owner_address) DO UPDATE SET
+           username = excluded.username,
+           display_name = excluded.display_name,
+           profile_image_url = excluded.profile_image_url,
+           verified_at = now()`
+      ).run(authorIdForDb, profile.username, profile.name, ownerAddress, profile.profile_image_url ?? null);
 
       const tokenAddress = (process.env.USDC_ADDRESS || "0x3600000000000000000000000000000000000000").toLowerCase();
       const maxPerTipRaw = process.env.X_BOT_MAX_PER_TIP_RAW || "10000000";
@@ -558,9 +581,15 @@ router.get("/claim-wallet-status/:address", async (req: Request, res: Response) 
   const db = getDb();
   if (DEBUG) console.log("[Teep:Backend] claim-wallet-status request", { address: address.slice(0, 10) + "…" });
 
-  const claim = await db.prepare(
+  let claim = await db.prepare(
     "SELECT author_id, username FROM verified_claims WHERE owner_address = ? ORDER BY verified_at DESC LIMIT 1"
   ).get(address) as { author_id: string; username: string } | undefined;
+
+  if (!claim) {
+    claim = await db.prepare(
+      "SELECT x_user_id as author_id, x_username as username FROM x_accounts WHERE user_address = ? ORDER BY verified_at DESC LIMIT 1"
+    ).get(address) as { author_id: string; username: string } | undefined;
+  }
 
   if (!claim) {
     res.json({ deployed: false, claimWalletAddress: null, totalEarnedRaw: "0" });
@@ -576,7 +605,18 @@ router.get("/claim-wallet-status/:address", async (req: Request, res: Response) 
      FROM tips t LEFT JOIN tip_metadata m ON t.content_id = m.content_id
      WHERE ${creatorTipPredicate("t")}`
   ).get(authorIdForChain, claim.username) as { total: string } | undefined;
-  const totalEarnedRaw = String(Math.round(Number(totalEarnedRow?.total ?? 0)));
+  const xBotEarnedRow = await db.prepare(
+    `SELECT COALESCE(SUM(CAST(amount_raw AS NUMERIC)), 0) as total
+     FROM x_bot_tips
+     WHERE status = 'completed'
+       AND (recipient_x_user_id = ? OR LOWER(COALESCE(recipient_x_username, '')) = LOWER(?))
+       AND NOT EXISTS (
+         SELECT 1 FROM tips
+         WHERE x_bot_tips.tx_hash IS NOT NULL
+           AND LOWER(tips.tx_hash) = LOWER(x_bot_tips.tx_hash)
+       )`
+  ).get(authorIdForChain, claim.username) as { total: string } | undefined;
+  const totalEarnedRaw = String(Math.round(Number(totalEarnedRow?.total ?? 0) + Number(xBotEarnedRow?.total ?? 0)));
 
   // Always use the current factory's computeClaimWallet for where tips go.
   // Legacy addresses remain recorded for recovery, but are not part of the
@@ -670,7 +710,7 @@ router.get("/claim-status/:address", async (req: Request, res: Response) => {
   const address = (req.params.address as string).toLowerCase();
   const db = getDb();
 
-  const claims = await db.prepare(
+  let claims = await db.prepare(
     "SELECT author_id, username, display_name, profile_image_url, verified_at FROM verified_claims WHERE owner_address = ? ORDER BY verified_at DESC"
   ).all(address) as Array<{
     author_id: string;
@@ -679,6 +719,21 @@ router.get("/claim-status/:address", async (req: Request, res: Response) => {
     profile_image_url: string | null;
     verified_at: string;
   }>;
+
+  if (claims.length === 0) {
+    claims = await db.prepare(
+      `SELECT x_user_id as author_id, x_username as username, NULL as display_name, NULL as profile_image_url, verified_at
+       FROM x_accounts
+       WHERE user_address = ?
+       ORDER BY verified_at DESC`
+    ).all(address) as Array<{
+      author_id: string;
+      username: string;
+      display_name: string;
+      profile_image_url: string | null;
+      verified_at: string;
+    }>;
+  }
 
   res.json({
     address,
