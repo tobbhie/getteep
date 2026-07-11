@@ -11,6 +11,8 @@ import Privacy from "./pages/Privacy";
 import Support from "./pages/Support";
 import Leaderboard from "./pages/Leaderboard";
 import FundAccount from "./pages/FundAccount";
+import XTipRegister from "./pages/XTipRegister";
+import XReceipt from "./pages/XReceipt";
 import Dashboard from "./pages/Dashboard";
 import DashboardWithdraw from "./pages/DashboardWithdraw";
 import DashboardDiscover from "./pages/DashboardDiscover";
@@ -45,6 +47,7 @@ const RESERVED_TOP_LEVEL_ROUTES = new Set([
   "privacy",
   "profile",
   "referral",
+  "register",
   "stats",
   "support",
   "t",
@@ -52,6 +55,7 @@ const RESERVED_TOP_LEVEL_ROUTES = new Set([
   "tips",
   "tx",
   "withdrawal",
+  "x",
 ]);
 
 function DashboardEntry() {
@@ -167,7 +171,9 @@ export default function App() {
         <Route path="/terms" element={<Terms />} />
         <Route path="/privacy" element={<Privacy />} />
         <Route path="/support" element={<Support />} />
+        <Route path="/register" element={<XTipRegister />} />
         <Route path="/fund" element={<FundAccount />} />
+        <Route path="/x/:receiptId" element={<XReceipt />} />
         <Route path="/leaderboard" element={<Leaderboard />} />
         <Route path="/ops" element={<AdminOps />} />
         <Route path="/ops/dashboard" element={<AdminOps />} />

@@ -46,26 +46,35 @@ export function buildConnectReply(handle?: string, context?: IntentReplyContext)
     "Almost there.",
     "",
     intentLine,
+    intentLine ? "" : undefined,
     `${who} needs to connect X on Teep and fund a Teep balance first.`,
+    "",
     `Connect: ${buildIntentUrl(context)}`,
   ]
     .filter(Boolean)
     .join("\n");
 }
 
-export function buildInsufficientBalanceReply(handle?: string) {
+export function buildInsufficientBalanceReply(handle?: string, context?: IntentReplyContext) {
   const who = handle ? `@${handle.replace(/^@/, "")}, your` : "Your";
   return [
     "Couldn't send this tip yet.",
     "",
     `Reason: ${who} Teep balance is lower than the requested amount.`,
-    `Add funds: ${buildAppUrl("/fund", { intent: "x-tip" })}`,
+    "",
+    `Add funds: ${buildAppUrl("/fund", {
+      intent: "x-tip",
+      tweetId: context?.tweetId,
+      recipient: context?.recipientHandle?.replace(/^@/, ""),
+      amount: context?.amount,
+    })}`,
   ].join("\n");
 }
 
 export function buildFailureReply(reason: string) {
   const lines = ["Couldn't send this tip yet.", "", `Reason: ${reason}`];
   if (/settings/i.test(reason)) {
+    lines.push("");
     lines.push(`Settings: ${buildAppUrl("/dashboard/settings", { tab: "tipping" })}`);
   }
   return lines.join("\n");
@@ -84,6 +93,7 @@ export function buildSuccessReply(params: {
     "Tip sent",
     "",
     `${sender} tipped ${recipient} ${amount} USD through Teep.`,
+    "",
     `Receipt: ${RECEIPT_BASE_URL}/x/${params.receiptId}`,
   ].join("\n");
 }
@@ -106,7 +116,9 @@ export function buildClaimableReply(params: {
     "Tip reserved",
     "",
     `${sender} tipped ${recipient} ${amount} USD through Teep.`,
-    `${recipient}, connect on Teep to claim: ${claimUrl}`,
+    "",
+    `Claim: ${claimUrl}`,
+    "",
     `Receipt: ${RECEIPT_BASE_URL}/x/${params.receiptId}`,
   ].join("\n");
 }
@@ -132,8 +144,10 @@ export function buildBatchSuccessReply(params: {
     `${sender} tipped:`,
     ...lines,
     moreCount > 0 ? `+${moreCount} more` : undefined,
+    params.reserved.length > 0 ? "" : undefined,
+    params.reserved.length > 0 ? "Reserved tips can be claimed on Teep." : undefined,
+    firstReceipt ? "" : undefined,
     firstReceipt ? `Receipt: ${RECEIPT_BASE_URL}/x/${firstReceipt}` : undefined,
-    params.reserved.length > 0 ? "Creators with reserved tips can connect to Teep to claim." : undefined,
   ]
     .filter(Boolean)
     .join("\n");
@@ -142,7 +156,7 @@ export function buildBatchSuccessReply(params: {
 export function buildBalanceReply(handle: string | undefined, amountRaw: bigint) {
   const amount = formatUsdcRaw(amountRaw);
   const who = handle ? `@${handle.replace(/^@/, "")}` : "You";
-  return [`${who}'s Teep balance: ${amount} USD`, `Add funds: ${buildAppUrl("/fund", { intent: "x-balance" })}`].join(
+  return [`${who}'s Teep balance`, "", `${amount} USD`, "", `Add funds: ${buildAppUrl("/fund", { intent: "x-balance" })}`].join(
     "\n"
   );
 }
@@ -150,6 +164,7 @@ export function buildBalanceReply(handle: string | undefined, amountRaw: bigint)
 export function buildHelpReply() {
   return [
     "Teep X commands:",
+    "",
     `@${BOT_HANDLE} tip @creator 5`,
     `@${BOT_HANDLE} tip this post 5`,
     `@${BOT_HANDLE} balance`,

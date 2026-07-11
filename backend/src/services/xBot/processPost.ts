@@ -302,7 +302,7 @@ export async function processIncomingPost(post: XIncomingPost): Promise<ProcessP
   if (!validation.ok) {
     const replyText =
       validation.code === "INSUFFICIENT_BALANCE"
-        ? buildInsufficientBalanceReply(sender.xUsername)
+        ? buildInsufficientBalanceReply(sender.xUsername, firstIntentContext(post, command.tips[0]))
         : buildFailureReply(validation.reason);
     await markProcessed(post.id, post.authorId, "failed", validation.code);
     return { tweetId: post.id, status: "failed", code: validation.code, replyText };
@@ -421,7 +421,7 @@ export async function processIncomingPost(post: XIncomingPost): Promise<ProcessP
     const message = err instanceof Error ? err.message : "UNKNOWN";
     const replyText =
       message === "INSUFFICIENT_BALANCE"
-        ? buildInsufficientBalanceReply(sender.xUsername)
+        ? buildInsufficientBalanceReply(sender.xUsername, firstIntentContext(post, command.tips[0]))
         : buildFailureReply("Something went wrong sending this tip.");
     await markProcessed(post.id, post.authorId, "failed", message);
     return { tweetId: post.id, status: "failed", code: message, replyText };

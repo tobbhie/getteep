@@ -128,7 +128,7 @@ router.get("/receipt/x/:receiptId", async (req: Request, res: Response) => {
   const db = getDb();
   const row = await db
     .prepare(
-      `SELECT id, sender_address, recipient_address, recipient_x_username, amount_raw, source_tweet_id, created_at
+      `SELECT id, sender_address, recipient_address, recipient_x_user_id, recipient_x_username, amount_raw, source_tweet_id, tx_hash, created_at
        FROM x_bot_tips WHERE receipt_id = ?`
     )
     .get(receiptId) as
@@ -136,9 +136,11 @@ router.get("/receipt/x/:receiptId", async (req: Request, res: Response) => {
         id: string;
         sender_address: string;
         recipient_address: string | null;
+        recipient_x_user_id: string;
         recipient_x_username: string | null;
         amount_raw: string;
         source_tweet_id: string;
+        tx_hash: string;
         created_at: number;
       }
     | undefined;
@@ -151,8 +153,10 @@ router.get("/receipt/x/:receiptId", async (req: Request, res: Response) => {
       fromAddress: row.sender_address,
       toAddress: row.recipient_address,
       amount: row.amount_raw,
+      txHash: row.tx_hash,
       displayAmount: senderSettings.receipts.shareAmountEnabled,
       timestamp: Math.floor(row.created_at / 1000),
+      authorId: row.recipient_x_user_id,
       authorHandle: row.recipient_x_username,
       tweetId: row.source_tweet_id,
       source: "x_bot",
@@ -328,6 +332,61 @@ router.get("/receipt/:txHash", async (req: Request, res: Response) => {
         kind: "referral_fee_received",
         receiptPreferences: settings.receipts,
         accountIdentity: identity.label,
+      });
+      return;
+    }
+
+    const xBotTip = await db
+      .prepare(
+        `SELECT sender_address, recipient_address, recipient_x_user_id, recipient_x_username,
+                amount_raw, source_tweet_id, tx_hash, created_at
+         FROM x_bot_tips
+         WHERE LOWER(tx_hash) = ?
+         LIMIT 1`
+      )
+      .get(txHash) as
+      | {
+          sender_address: string;
+          recipient_address: string | null;
+          recipient_x_user_id: string;
+          recipient_x_username: string | null;
+          amount_raw: string;
+          source_tweet_id: string;
+          tx_hash: string;
+          created_at: number;
+        }
+      | undefined;
+    if (xBotTip) {
+      const senderSettings = await getUserSettings(xBotTip.sender_address);
+      const senderIdentity = await publicIdentity(xBotTip.sender_address);
+      const verifiedCreator = xBotTip.recipient_x_username
+        ? await db
+            .prepare(
+              `SELECT username, owner_address
+               FROM verified_claims
+               WHERE author_id = ? OR LOWER(username) = LOWER(?)
+               ORDER BY CASE WHEN author_id = ? THEN 0 ELSE 1 END, verified_at DESC
+               LIMIT 1`
+            )
+            .get(xBotTip.recipient_x_user_id, xBotTip.recipient_x_username, xBotTip.recipient_x_user_id) as { username: string; owner_address: string } | undefined
+        : undefined;
+      res.json({
+        fromAddress: senderSettings.privacy.hideAddress ? null : xBotTip.sender_address,
+        fromIdentity: senderIdentity.label,
+        toAddress: xBotTip.recipient_address,
+        amount: xBotTip.amount_raw,
+        displayAmount: senderSettings.receipts.shareAmountEnabled,
+        txHash: xBotTip.tx_hash,
+        timestamp: Math.floor(xBotTip.created_at / 1000),
+        authorId: xBotTip.recipient_x_user_id,
+        contentId: "",
+        authorHandle: verifiedCreator?.username || xBotTip.recipient_x_username,
+        tweetId: xBotTip.source_tweet_id,
+        kind: "direct_creator_tip",
+        creatorClaimStatus: verifiedCreator ? "verified" : "claim_wallet_active",
+        creatorVerified: Boolean(verifiedCreator),
+        creatorOwnerAddress: verifiedCreator?.owner_address || null,
+        receiptPreferences: senderSettings.receipts,
       });
       return;
     }

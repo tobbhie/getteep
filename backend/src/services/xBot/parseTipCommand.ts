@@ -33,11 +33,11 @@ export function parseTipCommand(text: string): ParsedCommand | null {
     return { type: "BALANCE" };
   }
 
-  if (/\b(tip|send|grow|help)\b/i.test(normalized)) {
+  if (/\b(help)\b/i.test(normalized)) {
     return { type: "HELP" };
   }
 
-  return { type: "HELP" };
+  return null;
 }
 
 export function amountToRaw(amount: string): bigint {

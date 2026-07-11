@@ -4,7 +4,7 @@ import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
 import { buildFundingPolicy } from "@teep/shared";
 import DashboardShell from "../components/DashboardShell";
-import { DashboardConnectPage, DashboardPreparingPage } from "../components/DashboardAuthState";
+import { DashboardPreparingPage } from "../components/DashboardAuthState";
 import {
   API_BASE,
   ENABLE_FIAT_OFFRAMP,
@@ -26,7 +26,7 @@ function shortAddress(address: string) {
 
 export default function FundAccount() {
   const [searchParams] = useSearchParams();
-  const { ready, authenticated, user } = usePrivy();
+  const { ready, authenticated, user, login } = usePrivy();
   const { wallets } = useWallets();
   const { client: smartWalletClient } = useSmartWallets();
   const embeddedWallet = wallets.find((wallet) => wallet.walletClientType === "privy");
@@ -50,6 +50,9 @@ export default function FundAccount() {
   const [faucetLoading, setFaucetLoading] = useState(false);
 
   const intent = searchParams.get("intent") || "";
+  const recipient = (searchParams.get("recipient") || "").replace(/^@/, "").trim();
+  const amount = (searchParams.get("amount") || "").replace(/^\$/, "").trim();
+  const hasXTipContext = intent === "x-tip" && recipient && /^\d+(\.\d{1,2})?$/.test(amount);
   const fundingPolicy = buildFundingPolicy({
     environment: FUNDING_ENV,
     faucetUrl: FAUCET_URL,
@@ -115,10 +118,35 @@ export default function FundAccount() {
 
   if (!authenticated) {
     return (
-      <DashboardConnectPage
-        title="Add funds"
-        message={intent === "x-tip" ? "Sign in to fund your Teep balance and continue with X tipping." : "Sign in to fund your Teep balance."}
-      />
+      <main className="public-shell" style={{ minHeight: "calc(100vh - 88px)", display: "grid", placeItems: "center", padding: "clamp(32px, 8vw, 96px) var(--space-4)" }}>
+        <section className="dashboard-card" style={{ width: "min(100%, 620px)", display: "grid", gap: "var(--space-5)" }}>
+          <div>
+            <p className="eyebrow">Funding</p>
+            <h1 style={{ margin: "0 0 var(--space-3)", fontSize: "clamp(2rem, 8vw, 3.75rem)", lineHeight: 1 }}>
+              {hasXTipContext ? `Fund your $${amount} tip` : "Fund your Teep account"}
+            </h1>
+            <p style={{ color: "var(--text-secondary)", margin: 0, fontSize: "1.05rem", lineHeight: 1.6 }}>
+              {hasXTipContext
+                ? `Sign in to add funds for your tip to @${recipient}.`
+                : intent === "x-tip"
+                  ? "Sign in to add funds and continue with X tipping."
+                  : "Sign in to add funds to your Teep balance."}
+            </p>
+          </div>
+          {hasXTipContext && (
+            <div className="dashboard-settings-list-row" style={{ alignItems: "center" }}>
+              <div>
+                <strong>Pending X tip</strong>
+                <span>@{recipient}</span>
+              </div>
+              <strong style={{ color: "var(--text-primary)" }}>${amount}</strong>
+            </div>
+          )}
+          <button type="button" onClick={login} className="btn-primary" style={{ width: "100%", justifyContent: "center" }}>
+            Continue
+          </button>
+        </section>
+      </main>
     );
   }
 
@@ -134,7 +162,9 @@ export default function FundAccount() {
             <p className="eyebrow">Funding</p>
             <h1 style={{ fontSize: "2rem", fontWeight: 900, margin: "0 0 var(--space-2)" }}>Fund your Teep account</h1>
             <p style={{ color: "var(--text-secondary)", maxWidth: 620, margin: 0 }}>
-              Add funds to your Teep balance, then return to X and send your tip command again.
+              {hasXTipContext
+                ? `Add funds for your $${amount} tip to @${recipient}, then return to X and send the command again.`
+                : "Add funds to your Teep balance, then return to X and send your tip command again."}
             </p>
           </div>
         </section>

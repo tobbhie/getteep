@@ -84,12 +84,33 @@ export async function getAccountActivity(options: {
          LIMIT ?`
       , [address, limit]);
 
+  const xBotTipsSent = await query<AccountActivityRecord>(
+    `SELECT 'direct_creator_tip' as type,
+            amount_raw as amount,
+            tx_hash,
+            CAST(created_at / 1000 AS INTEGER) as timestamp,
+            recipient_x_username as author_handle,
+            source_tweet_id as tweet_id,
+            'X tip command' as detail,
+            COALESCE(
+              (SELECT profile_image_url FROM verified_claims WHERE author_id = xbt.recipient_x_user_id AND profile_image_url IS NOT NULL ORDER BY verified_at DESC LIMIT 1),
+              (SELECT profile_image_url FROM verified_claims WHERE LOWER(username) = LOWER(COALESCE(xbt.recipient_x_username, '')) AND profile_image_url IS NOT NULL ORDER BY verified_at DESC LIMIT 1)
+            ) as profileImageUrl
+     FROM x_bot_tips xbt
+     WHERE LOWER(sender_address) = ?
+       AND status = 'completed'
+     ORDER BY created_at DESC
+     LIMIT ?`,
+    [address, limit],
+  );
+
   const claim = await one<{ username: string; author_id: string }>(
     "SELECT username, author_id FROM verified_claims WHERE owner_address = ? ORDER BY verified_at DESC LIMIT 1",
     [address]
   );
 
   let tipsReceived: AccountActivityRecord[] = [];
+  let xBotTipsReceived: AccountActivityRecord[] = [];
   if (claim) {
     tipsReceived = currentContract
       ? await query<AccountActivityRecord>(
@@ -119,6 +140,31 @@ export async function getAccountActivity(options: {
            ORDER BY t.timestamp DESC
            LIMIT ?`
         , [claim.author_id, claim.username, limit]);
+
+    xBotTipsReceived = await query<AccountActivityRecord>(
+      `SELECT 'tip_received' as type,
+              amount_raw as amount,
+              tx_hash,
+              CAST(created_at / 1000 AS INTEGER) as timestamp,
+              sender_address as from_addr,
+              recipient_x_username as author_handle,
+              source_tweet_id as tweet_id,
+              'X tip command' as detail,
+              COALESCE(
+                (SELECT profile_image_url FROM verified_claims WHERE author_id = xbt.recipient_x_user_id AND profile_image_url IS NOT NULL ORDER BY verified_at DESC LIMIT 1),
+                (SELECT profile_image_url FROM verified_claims WHERE LOWER(username) = LOWER(COALESCE(xbt.recipient_x_username, '')) AND profile_image_url IS NOT NULL ORDER BY verified_at DESC LIMIT 1)
+              ) as profileImageUrl
+       FROM x_bot_tips xbt
+       WHERE status = 'completed'
+         AND (
+           recipient_x_user_id = ?
+           OR LOWER(COALESCE(recipient_x_username, '')) = LOWER(?)
+           OR LOWER(COALESCE(recipient_address, '')) = ?
+         )
+       ORDER BY created_at DESC
+       LIMIT ?`,
+      [claim.author_id, claim.username, address, limit],
+    );
   }
 
   const referralFees = await query<AccountActivityRecord>(
@@ -170,7 +216,7 @@ export async function getAccountActivity(options: {
      LIMIT ?`
   , [address, limit]);
 
-  const normalizedRows = normalizeRows([...tipsSent, ...tipsReceived, ...fundingRows, ...withdrawalRows, ...referralFees]);
+  const normalizedRows = normalizeRows([...tipsSent, ...xBotTipsSent, ...tipsReceived, ...xBotTipsReceived, ...fundingRows, ...withdrawalRows, ...referralFees]);
   const seenTxHash = new Set<string>();
   const deduped: AccountActivityRecord[] = [];
   for (const row of normalizedRows) {

@@ -22,6 +22,7 @@ const RESERVED_TOP_LEVEL_ROUTES = new Set([
   "privacy",
   "profile",
   "referral",
+  "register",
   "stats",
   "support",
   "t",
@@ -29,6 +30,7 @@ const RESERVED_TOP_LEVEL_ROUTES = new Set([
   "tips",
   "tx",
   "withdrawal",
+  "x",
 ]);
 
 function escapeHtml(value: string): string {
@@ -321,8 +323,49 @@ export function mountWebProfileRenderer(app: Express): void {
     res.status(200).type("html").send(indexHtml);
   }
 
-  app.get(["/", "/leaderboard", "/fees", "/ops", "/ops/dashboard", "/terms", "/privacy", "/support"], (req: Request, res: Response, next: NextFunction) => {
+  app.get(
+    [
+      "/",
+      "/dashboard",
+      "/dashboard/withdraw",
+      "/dashboard/discover",
+      "/dashboard/referrals",
+      "/dashboard/settings",
+      "/dashboard/grow-tips",
+      "/creator/dashboard",
+      "/creator/withdraw",
+      "/creator/settings",
+      "/creator/referrals",
+      "/creator/performance",
+      "/creator/grow/earn",
+      "/creator/grow/learn",
+      "/creator/grow/settings",
+      "/leaderboard",
+      "/fees",
+      "/fund",
+      "/ops",
+      "/ops/dashboard",
+      "/register",
+      "/terms",
+      "/privacy",
+      "/support",
+    ],
+    (req: Request, res: Response, next: NextFunction) => {
     if (!req.accepts("html")) {
+      next();
+      return;
+    }
+    sendGenericShell(req, res);
+    },
+  );
+
+  app.get("/x/:receiptId", (req: Request, res: Response, next: NextFunction) => {
+    if (!req.accepts("html")) {
+      next();
+      return;
+    }
+    const receiptId = String(req.params.receiptId || "").trim();
+    if (!/^[a-f0-9]{16}$/i.test(receiptId)) {
       next();
       return;
     }
