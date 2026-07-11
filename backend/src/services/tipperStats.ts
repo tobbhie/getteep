@@ -98,6 +98,29 @@ export async function getUnifiedTipperStats(addressParam: string): Promise<Unifi
          ORDER BY t.timestamp DESC`
       ).all(address)) as IndexedTipRow[];
 
+  const xBotTips = await db.prepare(
+    `SELECT
+       '' as content_id,
+       recipient_x_user_id as author_id,
+       amount_raw as amount,
+       tx_hash,
+       CAST(created_at / 1000 AS INTEGER) as timestamp,
+       recipient_x_username as author_handle
+     FROM x_bot_tips
+     WHERE LOWER(sender_address) = ?
+       AND status = 'completed'
+     ORDER BY created_at DESC`
+  ).all(address) as IndexedTipRow[];
+
+  const seenTipTxHashes = new Set<string>();
+  const allSentTips = [...indexedTips, ...xBotTips].filter((tip) => {
+    const hash = tip.tx_hash?.toLowerCase();
+    if (!hash) return true;
+    if (seenTipTxHashes.has(hash)) return false;
+    seenTipTxHashes.add(hash);
+    return true;
+  });
+
   let totalSent = 0n;
   let tipCount = 0;
   const creators = new Map<string, { authorId: string; username: string | null; profileImageUrl: string | null; totalRaw: bigint; tipCount: number }>();
@@ -124,7 +147,7 @@ export async function getUnifiedTipperStats(addressParam: string): Promise<Unifi
     creators.set(key, existing);
   }
 
-  for (const tip of indexedTips) {
+  for (const tip of allSentTips) {
     const amount = toRawBigInt(tip.amount);
     totalSent += amount;
     tipCount += 1;
@@ -233,7 +256,10 @@ export async function getUnifiedTipperStats(addressParam: string): Promise<Unifi
     totalSent: totalSent.toString(),
     tipCount,
     thankYouReceivedCount: Number(thankYouReceived?.count || 0),
-    recentTips: indexedTips.slice(0, 8).map((tip) => {
+    recentTips: allSentTips
+      .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0))
+      .slice(0, 8)
+      .map((tip) => {
       const handle = tip.author_handle?.replace(/^@/, "").toLowerCase() || null;
       const creator = (tip.author_id ? creatorStatusByKey.get(`author:${tip.author_id}`) : undefined) || (handle ? creatorStatusByKey.get(`handle:${handle}`) : undefined);
       const amount = toRawBigInt(tip.amount);

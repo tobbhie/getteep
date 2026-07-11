@@ -154,6 +154,76 @@ export default function FundAccount() {
     return <DashboardPreparingPage title="Add funds" message="Getting your Teep account ready." />;
   }
 
+  const fundingPanel = (
+    <section className={hasXTipContext ? "dashboard-card x-tip-link-card" : "dashboard-card"} style={{ display: "grid", gap: "var(--space-5)", maxWidth: hasXTipContext ? undefined : 920 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: "var(--space-4)", alignItems: "flex-start", flexWrap: "wrap" }}>
+        <div>
+          <p className="dashboard-metric-label" style={{ marginBottom: 6 }}>Current Teep balance</p>
+          <strong style={{ color: "#fff", fontSize: "2rem", lineHeight: 1 }}>${formatUsdRaw(balanceRaw)}</strong>
+        </div>
+        <button type="button" onClick={copyAddress} className="btn-secondary" style={{ minHeight: 42 }}>
+          {shortAddress(address)}
+          <span className="material-symbols-outlined" aria-hidden style={{ fontSize: 18 }}>content_copy</span>
+        </button>
+      </div>
+
+      <div className="dashboard-funding-options" style={{ display: "grid", gap: "var(--space-3)" }}>
+        {onrampUrl ? (
+          <a href={onrampUrl} target="_blank" rel="noopener noreferrer" className="dashboard-funding-option">
+            <span>
+              <strong>{fundingPolicy.providers.fiatOnramp.label}</strong>
+              <small>{fundingPolicy.providers.fiatOnramp.description}</small>
+            </span>
+            <span>Open</span>
+          </a>
+        ) : (
+          <button type="button" className="dashboard-funding-option" disabled title={fundingPolicy.providers.fiatOnramp.disabledReason}>
+            <span>
+              <strong>{fundingPolicy.providers.fiatOnramp.label}</strong>
+              <small>{fundingPolicy.providers.fiatOnramp.disabledReason || fundingPolicy.providers.fiatOnramp.description}</small>
+            </span>
+            <span>Soon</span>
+          </button>
+        )}
+
+        <button type="button" onClick={openFaucet} disabled={faucetLoading || !fundingPolicy.providers.faucet.enabled} className="dashboard-funding-option">
+          <span>
+            <strong>{fundingPolicy.providers.faucet.label}</strong>
+            <small>{fundingPolicy.providers.faucet.description}</small>
+          </span>
+          <span>{faucetLoading ? "..." : "Open"}</span>
+        </button>
+
+        <button type="button" onClick={copyAddress} className="dashboard-funding-option">
+          <span>
+            <strong>{fundingPolicy.providers.cryptoReceive.label}</strong>
+            <small>{fundingPolicy.providers.cryptoReceive.description}</small>
+          </span>
+          <span>Copy</span>
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gap: "var(--space-2)" }}>
+        <p className="dashboard-funding-note" style={{ margin: 0 }}>{fundingPolicy.testnetCopy}</p>
+        {copyStatus && <p className="dashboard-funding-note dashboard-funding-note--status" style={{ margin: 0 }}>{copyStatus}</p>}
+        {faucetStatus && <p className="dashboard-funding-note dashboard-funding-note--status" style={{ margin: 0 }}>{faucetStatus}</p>}
+      </div>
+    </section>
+  );
+
+  if (hasXTipContext) {
+    return (
+      <main className="x-tip-link-page x-tip-link-page--fund">
+        <section className="x-tip-link-hero">
+          <p className="eyebrow">X tip setup</p>
+          <h1>Fund your ${amount} tip</h1>
+          <p>Add funds for your tip to @{recipient}, then return to X and send the same command again.</p>
+        </section>
+        {fundingPanel}
+      </main>
+    );
+  }
+
   return (
     <DashboardShell title="Add funds" address={address}>
       <main className="dashboard-body-inner">
@@ -169,60 +239,7 @@ export default function FundAccount() {
           </div>
         </section>
 
-        <section className="dashboard-card" style={{ display: "grid", gap: "var(--space-5)", maxWidth: 920 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: "var(--space-4)", alignItems: "flex-start", flexWrap: "wrap" }}>
-            <div>
-              <p className="dashboard-metric-label" style={{ marginBottom: 6 }}>Current Teep balance</p>
-              <strong style={{ color: "#fff", fontSize: "2rem", lineHeight: 1 }}>${formatUsdRaw(balanceRaw)}</strong>
-            </div>
-            <button type="button" onClick={copyAddress} className="btn-secondary" style={{ minHeight: 42 }}>
-              {shortAddress(address)}
-              <span className="material-symbols-outlined" aria-hidden style={{ fontSize: 18 }}>content_copy</span>
-            </button>
-          </div>
-
-          <div className="dashboard-funding-options" style={{ display: "grid", gap: "var(--space-3)" }}>
-            {onrampUrl ? (
-              <a href={onrampUrl} target="_blank" rel="noopener noreferrer" className="dashboard-funding-option">
-                <span>
-                  <strong>{fundingPolicy.providers.fiatOnramp.label}</strong>
-                  <small>{fundingPolicy.providers.fiatOnramp.description}</small>
-                </span>
-                <span>Open</span>
-              </a>
-            ) : (
-              <button type="button" className="dashboard-funding-option" disabled title={fundingPolicy.providers.fiatOnramp.disabledReason}>
-                <span>
-                  <strong>{fundingPolicy.providers.fiatOnramp.label}</strong>
-                  <small>{fundingPolicy.providers.fiatOnramp.disabledReason || fundingPolicy.providers.fiatOnramp.description}</small>
-                </span>
-                <span>Soon</span>
-              </button>
-            )}
-
-            <button type="button" onClick={openFaucet} disabled={faucetLoading || !fundingPolicy.providers.faucet.enabled} className="dashboard-funding-option">
-              <span>
-                <strong>{fundingPolicy.providers.faucet.label}</strong>
-                <small>{fundingPolicy.providers.faucet.description}</small>
-              </span>
-              <span>{faucetLoading ? "..." : "Open"}</span>
-            </button>
-
-            <button type="button" onClick={copyAddress} className="dashboard-funding-option">
-              <span>
-                <strong>{fundingPolicy.providers.cryptoReceive.label}</strong>
-                <small>{fundingPolicy.providers.cryptoReceive.description}</small>
-              </span>
-              <span>Copy</span>
-            </button>
-          </div>
-
-          <div style={{ display: "grid", gap: "var(--space-2)" }}>
-            <p className="dashboard-funding-note" style={{ margin: 0 }}>{fundingPolicy.testnetCopy}</p>
-            {copyStatus && <p className="dashboard-funding-note dashboard-funding-note--status" style={{ margin: 0 }}>{copyStatus}</p>}
-            {faucetStatus && <p className="dashboard-funding-note dashboard-funding-note--status" style={{ margin: 0 }}>{faucetStatus}</p>}
-          </div>
-        </section>
+        {fundingPanel}
 
         <div style={{ marginTop: "var(--space-5)", display: "flex", gap: "var(--space-3)", flexWrap: "wrap" }}>
           <Link to="/dashboard" className="btn-secondary">Open dashboard</Link>

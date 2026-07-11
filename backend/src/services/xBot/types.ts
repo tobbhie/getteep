@@ -22,8 +22,12 @@ export type TipBatchCommand = {
 
 export type BalanceCommand = { type: "BALANCE" };
 export type HelpCommand = { type: "HELP" };
+export type InvalidCommand = {
+  type: "INVALID_COMMAND";
+  reason: "MISSING_AMOUNT" | "MISSING_RECIPIENT" | "UNSUPPORTED_ASSET" | "MALFORMED";
+};
 
-export type ParsedCommand = TipBatchCommand | BalanceCommand | HelpCommand;
+export type ParsedCommand = TipBatchCommand | BalanceCommand | HelpCommand | InvalidCommand;
 
 export type ProcessPostResult = {
   tweetId: string;

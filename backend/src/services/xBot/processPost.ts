@@ -8,7 +8,7 @@ import {
   getDefaultTokenAddress,
 } from "../teepBalance";
 import { getOnchainTeepBalance, getOnchainXTippingReadiness, relayXTip } from "../xTippingRouter";
-import { amountToRaw, formatUsdcRaw, parseTipCommand } from "./parseTipCommand";
+import { amountToRaw, classifyIgnoredMention, formatUsdcRaw, parseTipCommand } from "./parseTipCommand";
 import {
   buildBalanceReply,
   buildBatchSuccessReply,
@@ -16,6 +16,7 @@ import {
   buildConnectReply,
   buildFailureReply,
   buildHelpReply,
+  buildInvalidCommandReply,
   buildInsufficientBalanceReply,
   buildSuccessReply,
 } from "./replies";
@@ -250,14 +251,21 @@ export async function processIncomingPost(post: XIncomingPost): Promise<ProcessP
 
   const command = parseTipCommand(post.text);
   if (!command) {
-    await markProcessed(post.id, post.authorId, "ignored", "NO_COMMAND");
-    return { tweetId: post.id, status: "ignored", code: "NO_COMMAND" };
+    const ignoredReason = classifyIgnoredMention(post.text) || "NO_COMMAND";
+    await markProcessed(post.id, post.authorId, "ignored", ignoredReason);
+    return { tweetId: post.id, status: "ignored", code: ignoredReason };
   }
 
   if (command.type === "HELP") {
     const replyText = buildHelpReply();
     await markProcessed(post.id, post.authorId, "completed", "HELP");
     return { tweetId: post.id, status: "completed", replyText };
+  }
+
+  if (command.type === "INVALID_COMMAND") {
+    const replyText = buildInvalidCommandReply(command.reason);
+    await markProcessed(post.id, post.authorId, "failed", command.reason);
+    return { tweetId: post.id, status: "failed", code: command.reason, replyText };
   }
 
   if (command.type === "BALANCE") {

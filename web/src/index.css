@@ -15183,6 +15183,125 @@ a.creator-public-supporter-card:hover {
     grid-template-columns: 1fr;
   }
 }
+
+/* X bot public intent pages */
+.x-tip-link-page {
+  min-height: calc(100vh - 88px);
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: var(--space-6);
+  padding: clamp(40px, 8vw, 96px) var(--space-4);
+  background:
+    radial-gradient(circle at 50% 10%, rgba(99, 36, 235, 0.16), transparent 34rem),
+    var(--bg-page);
+  color: var(--text-primary);
+}
+
+.x-tip-link-page--fund {
+  align-content: start;
+}
+
+.x-tip-link-hero,
+.x-tip-link-card {
+  width: min(100%, 42rem);
+}
+
+.x-tip-link-hero {
+  display: grid;
+  gap: var(--space-5);
+  text-align: center;
+}
+
+.x-tip-link-hero h1,
+.x-tip-link-card h1 {
+  margin: 0;
+  font-size: clamp(2.5rem, 9vw, 5rem);
+  line-height: 0.95;
+  letter-spacing: 0;
+  color: var(--text-primary);
+}
+
+.x-tip-link-hero p,
+.x-tip-link-card p {
+  margin: 0 auto;
+  max-width: 34rem;
+  color: var(--text-secondary);
+  font-size: clamp(1rem, 3vw, 1.25rem);
+  line-height: 1.55;
+}
+
+.x-tip-link-card {
+  display: grid;
+  gap: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: rgba(31, 28, 43, 0.72);
+  padding: clamp(28px, 6vw, 48px);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.32);
+}
+
+.x-tip-link-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  width: 100%;
+}
+
+.x-tip-link-summary div {
+  display: grid;
+  gap: 6px;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(45, 40, 57, 0.62);
+  text-align: left;
+}
+
+.x-tip-link-summary span {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.x-tip-link-summary strong {
+  color: var(--text-primary);
+  font-size: 1.1rem;
+}
+
+.x-tip-link-primary {
+  justify-self: center;
+  min-width: min(100%, 18rem);
+}
+
+.x-tip-link-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+  .x-tip-link-page {
+    min-height: calc(100vh - 76px);
+    align-content: start;
+    padding-top: var(--space-8);
+  }
+
+  .x-tip-link-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .x-tip-link-actions .btn-primary,
+  .x-tip-link-actions .btn-secondary,
+  .x-tip-link-primary {
+    width: 100%;
+    justify-content: center;
+  }
+}
 .dashboard-sidebar-footer .dashboard-sidebar-block {
   padding: var(--space-3);
 }

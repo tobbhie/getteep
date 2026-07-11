@@ -147,6 +147,9 @@ router.get("/receipt/x/:receiptId", async (req: Request, res: Response) => {
 
   if (row) {
     const senderSettings = await getUserSettings(row.sender_address);
+    const senderX = await db
+      .prepare(`SELECT x_username FROM x_accounts WHERE LOWER(user_address) = LOWER(?) ORDER BY verified_at DESC LIMIT 1`)
+      .get(row.sender_address) as { x_username: string } | undefined;
     res.json({
       kind: "x_bot",
       receiptId,
@@ -158,6 +161,8 @@ router.get("/receipt/x/:receiptId", async (req: Request, res: Response) => {
       timestamp: Math.floor(row.created_at / 1000),
       authorId: row.recipient_x_user_id,
       authorHandle: row.recipient_x_username,
+      recipientHandle: row.recipient_x_username,
+      tweetAuthorHandle: senderX?.x_username || null,
       tweetId: row.source_tweet_id,
       source: "x_bot",
       status: "completed",
@@ -188,6 +193,9 @@ router.get("/receipt/x/:receiptId", async (req: Request, res: Response) => {
   }
 
   const senderSettings = await getUserSettings(claimable.sender_address);
+  const senderX = await db
+    .prepare(`SELECT x_username FROM x_accounts WHERE LOWER(user_address) = LOWER(?) ORDER BY verified_at DESC LIMIT 1`)
+    .get(claimable.sender_address) as { x_username: string } | undefined;
   res.json({
     kind: "x_bot",
     receiptId,
@@ -197,6 +205,8 @@ router.get("/receipt/x/:receiptId", async (req: Request, res: Response) => {
     displayAmount: senderSettings.receipts.shareAmountEnabled,
     timestamp: Math.floor(claimable.created_at / 1000),
     authorHandle: claimable.recipient_x_username,
+    recipientHandle: claimable.recipient_x_username,
+    tweetAuthorHandle: senderX?.x_username || null,
     tweetId: claimable.source_tweet_id,
     source: "x_bot",
     status: claimable.status === "unclaimed" ? "reserved" : claimable.status,
@@ -359,6 +369,9 @@ router.get("/receipt/:txHash", async (req: Request, res: Response) => {
     if (xBotTip) {
       const senderSettings = await getUserSettings(xBotTip.sender_address);
       const senderIdentity = await publicIdentity(xBotTip.sender_address);
+      const senderX = await db
+        .prepare(`SELECT x_username FROM x_accounts WHERE LOWER(user_address) = LOWER(?) ORDER BY verified_at DESC LIMIT 1`)
+        .get(xBotTip.sender_address) as { x_username: string } | undefined;
       const verifiedCreator = xBotTip.recipient_x_username
         ? await db
             .prepare(
@@ -381,9 +394,11 @@ router.get("/receipt/:txHash", async (req: Request, res: Response) => {
         authorId: xBotTip.recipient_x_user_id,
         contentId: "",
         authorHandle: verifiedCreator?.username || xBotTip.recipient_x_username,
+        recipientHandle: verifiedCreator?.username || xBotTip.recipient_x_username,
+        tweetAuthorHandle: senderX?.x_username || senderIdentity.label?.replace(/^@/, "") || null,
         tweetId: xBotTip.source_tweet_id,
         kind: "direct_creator_tip",
-        creatorClaimStatus: verifiedCreator ? "verified" : "claim_wallet_active",
+        creatorClaimStatus: verifiedCreator ? "verified" : "unclaimed",
         creatorVerified: Boolean(verifiedCreator),
         creatorOwnerAddress: verifiedCreator?.owner_address || null,
         receiptPreferences: senderSettings.receipts,

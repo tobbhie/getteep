@@ -1,6 +1,6 @@
 import type { ParsedCommand } from "./types";
 
-const BOT_HANDLE = (process.env.X_BOT_USERNAME || "teep_app").replace(/^@/, "");
+const BOT_HANDLE = (process.env.X_BOT_USERNAME || "teepagent").replace(/^@/, "");
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -10,13 +10,40 @@ function normalizeText(text: string) {
   return text.trim().replace(/\s+/g, " ");
 }
 
+function removeBotMention(text: string) {
+  const botMention = `@${escapeRegExp(BOT_HANDLE)}\\b`;
+  return normalizeText(text.replace(new RegExp(botMention, "gi"), " "));
+}
+
+export function classifyIgnoredMention(text: string): string | null {
+  const cleaned = removeBotMention(text);
+  if (!cleaned) return "EMPTY_MENTION";
+
+  if (/^[\p{Emoji_Presentation}\p{Emoji}\s!?.,'"-]+$/u.test(cleaned)) {
+    return "REACTION_ONLY";
+  }
+
+  if (/^(l+o+l+|lmao+|lmfao+|haha+|hehe+|thanks?|thank you|nice|cool|ok(?:ay)?|alright|word|bet|done|great|gm|gn)$/i.test(cleaned)) {
+    return "ACKNOWLEDGEMENT";
+  }
+
+  return null;
+}
+
 export function parseTipCommand(text: string): ParsedCommand | null {
   const normalized = normalizeText(text);
   const botMention = `@${escapeRegExp(BOT_HANDLE)}\\b`;
 
   if (!new RegExp(botMention, "i").test(normalized)) return null;
 
-  const commandText = normalized.replace(new RegExp(botMention, "gi"), " ");
+  const ignoredReason = classifyIgnoredMention(normalized);
+  if (ignoredReason) return null;
+
+  const commandText = removeBotMention(normalized);
+  if (/\b(?:tip|send)\b/i.test(commandText) && /\b(?:eth|btc|sol|arc|matic|ngn)\b/i.test(commandText)) {
+    return { type: "INVALID_COMMAND", reason: "UNSUPPORTED_ASSET" };
+  }
+
   const tipPattern =
     /\b(?:tip|send)\s+(?:(?:@([A-Za-z0-9_]{1,15})|this\s+post)\s+)?\$?([0-9]+(?:\.[0-9]+)?)\s*(?:USDC|usdc|dollars?)?/gi;
   const tips = Array.from(commandText.matchAll(tipPattern)).map((match) => ({
@@ -29,12 +56,22 @@ export function parseTipCommand(text: string): ParsedCommand | null {
     return { type: "TIP_BATCH", tips };
   }
 
-  if (/\b(balance)\b/i.test(normalized)) {
+  if (/\b(balance|bal)\b/i.test(commandText)) {
     return { type: "BALANCE" };
   }
 
-  if (/\b(help)\b/i.test(normalized)) {
+  if (/\b(help|commands?)\b/i.test(commandText)) {
     return { type: "HELP" };
+  }
+
+  if (/\b(?:tip|send)\b/i.test(commandText)) {
+    if (!/@[A-Za-z0-9_]{1,15}\b/i.test(commandText) && !/\bthis\s+post\b/i.test(commandText)) {
+      return { type: "INVALID_COMMAND", reason: "MISSING_RECIPIENT" };
+    }
+    if (!/\$?[0-9]+(?:\.[0-9]+)?\b/i.test(commandText)) {
+      return { type: "INVALID_COMMAND", reason: "MISSING_AMOUNT" };
+    }
+    return { type: "INVALID_COMMAND", reason: "MALFORMED" };
   }
 
   return null;

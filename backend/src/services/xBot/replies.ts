@@ -2,7 +2,7 @@ import { formatUsdcRaw } from "./parseTipCommand";
 
 const WEB_APP_URL = (process.env.WEB_APP_URL || "https://getteep.xyz").replace(/\/$/, "");
 const RECEIPT_BASE_URL = (process.env.RECEIPT_BASE_URL || WEB_APP_URL).replace(/\/$/, "");
-const BOT_HANDLE = (process.env.X_BOT_USERNAME || "teepxyz").replace(/^@/, "");
+const BOT_HANDLE = (process.env.X_BOT_USERNAME || "teepagent").replace(/^@/, "");
 
 export type IntentReplyContext = {
   tweetId?: string;
@@ -78,6 +78,27 @@ export function buildFailureReply(reason: string) {
     lines.push(`Settings: ${buildAppUrl("/dashboard/settings", { tab: "tipping" })}`);
   }
   return lines.join("\n");
+}
+
+export function buildInvalidCommandReply(reason: "MISSING_AMOUNT" | "MISSING_RECIPIENT" | "UNSUPPORTED_ASSET" | "MALFORMED") {
+  const reasonText =
+    reason === "MISSING_AMOUNT"
+      ? "Add the amount you want to tip."
+      : reason === "MISSING_RECIPIENT"
+        ? "Add the creator handle, or reply to a post with \"tip this post\"."
+        : reason === "UNSUPPORTED_ASSET"
+          ? "Teep X tips currently support USD amounts only."
+          : "Use a simple Teep tip command.";
+
+  return [
+    "Command needs one more detail.",
+    "",
+    `Reason: ${reasonText}`,
+    "",
+    "Try:",
+    `@${BOT_HANDLE} tip @creator 5`,
+    `@${BOT_HANDLE} tip this post 5`,
+  ].join("\n");
 }
 
 export function buildSuccessReply(params: {

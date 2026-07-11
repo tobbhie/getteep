@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import * as QRCode from "qrcode";
-import { API_BASE, CHROME_STORE_URL, RECEIPT_BASE_URL, DOCS_URL, CHAIN_NAME, EXPLORER_TX_URL } from "../config";
+import { API_BASE, CHROME_STORE_URL, RECEIPT_BASE_URL, CHAIN_NAME, EXPLORER_TX_URL } from "../config";
 import { avatarErrorFallback, xAvatarUrl } from "../lib/avatar";
 
 interface ReceiptData {
@@ -15,6 +15,8 @@ interface ReceiptData {
   authorId: string;
   contentId: string;
   authorHandle: string | null;
+  recipientHandle?: string | null;
+  tweetAuthorHandle?: string | null;
   tweetId: string | null;
   kind?: string;
   creatorClaimStatus?: "unclaimed" | "verified" | "claim_wallet_active";
@@ -238,7 +240,7 @@ async function generateReceiptImage(params: { receiptUrl: string; amount: string
 
   ctx.fillStyle = "#ffffff";
   ctx.font = "800 24px Inter, system-ui, sans-serif";
-  ctx.fillText("Support creators directly via @teepxyz", 150, 990);
+  ctx.fillText("Support creators directly via @teepagent", 150, 990);
   ctx.fillStyle = "#a78bfa";
   ctx.font = "700 21px Inter, system-ui, sans-serif";
   ctx.fillText("https://getteep.xyz", 150, 1028);
@@ -276,9 +278,11 @@ export default function TxReceipt() {
       .finally(() => setLoading(false));
   }, [txHash]);
 
+  const tweetAuthorHandle = data?.tweetAuthorHandle || data?.authorHandle || null;
+  const baseTweetId = data?.tweetId?.split(":")[0] || null;
   const tweetUrl =
-    data?.authorHandle && data?.tweetId
-      ? `https://x.com/${data.authorHandle}/status/${data.tweetId}`
+    tweetAuthorHandle && baseTweetId
+      ? `https://x.com/${tweetAuthorHandle}/status/${baseTweetId}`
       : null;
 
   useEffect(() => {
@@ -319,8 +323,8 @@ export default function TxReceipt() {
 
   const shareOnX = () => {
     if (!data) return;
-    const creator = data.authorHandle
-      ? `@${data.authorHandle}`
+    const creator = data.recipientHandle || data.authorHandle
+      ? `@${data.recipientHandle || data.authorHandle}`
       : data.kind === "deposit"
         ? "my Teep account"
         : data.kind === "withdrawal"
@@ -333,14 +337,14 @@ export default function TxReceipt() {
     const receiptPart = `\n\nReceipt: ${receiptUrl}`;
     const text =
       data.kind === "direct_creator_tip"
-        ? `I just sent ${creator} a direct creator tip${amountPart} with Teep.${receiptPart}\nSupport creators directly via @teepxyz.`
+        ? `I just sent ${creator} a direct creator tip${amountPart} with Teep.${receiptPart}\nSupport creators directly via @teepagent.`
         : data.kind === "deposit"
-          ? `I just added${amountPart} to ${creator}.${receiptPart}\nSupport creators directly via @teepxyz.`
+          ? `I just added${amountPart} to ${creator}.${receiptPart}\nSupport creators directly via @teepagent.`
           : data.kind === "withdrawal"
-            ? `I just withdrew${amountPart} ${creator}.${receiptPart}\nSupport creators directly via @teepxyz.`
+            ? `I just withdrew${amountPart} ${creator}.${receiptPart}\nSupport creators directly via @teepagent.`
             : data.kind === "referral_fee_received"
-              ? `I just earned${amountPart} from Teep referrals.${receiptPart}\nSupport creators directly via @teepxyz.`
-              : `I just tipped ${creator}${amountPart} with Teep.${receiptPart}\nSupport creators directly via @teepxyz.`;
+              ? `I just earned${amountPart} from Teep referrals.${receiptPart}\nSupport creators directly via @teepagent.`
+              : `I just tipped ${creator}${amountPart} with Teep.${receiptPart}\nSupport creators directly via @teepagent.`;
     window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
   };
 
@@ -354,7 +358,7 @@ export default function TxReceipt() {
     if (!data) return;
     const amountUsd = formatUsdRaw(data.amount);
     const from = data.fromIdentity || "A supporter";
-    const to = data.authorHandle ? `@${data.authorHandle}` : "Creator";
+    const to = data.recipientHandle || data.authorHandle ? `@${data.recipientHandle || data.authorHandle}` : "Creator";
     const date = new Date(data.timestamp * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
     const imageUrl = await generateReceiptImage({
       receiptUrl,
@@ -411,7 +415,7 @@ export default function TxReceipt() {
   }
 
   const amountUsd = formatUsdRaw(data.amount);
-  const creatorHandle = data.authorHandle ? `@${data.authorHandle}` : "Creator";
+  const creatorHandle = data.recipientHandle || data.authorHandle ? `@${data.recipientHandle || data.authorHandle}` : "Creator";
   const isDirectTip = data.kind === "direct_creator_tip";
   const isPostTip = !data.kind || data.kind === "post_tip";
   const receiptKind =
@@ -430,16 +434,19 @@ export default function TxReceipt() {
     data.kind === "withdrawal" ? "Withdrawal Confirmed" :
     data.kind === "referral_fee_received" ? "Referral Earning Confirmed" :
     `${receiptKind} Sent Successfully`;
-  const tweetDisplayName = oembed?.author_name ?? creatorHandle;
+  const tweetDisplayName = oembed?.author_name ?? (tweetAuthorHandle ? `@${tweetAuthorHandle}` : creatorHandle);
   const tweetSnippet = oembed?.excerpt ?? "Post linked to this tip";
   const explorerUrl = `${EXPLORER_TX_URL}/${data.txHash}`;
   const dateStr = new Date(data.timestamp * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
   const isCreatorClaimed =
     data.creatorVerified === true ||
-    data.creatorClaimStatus === "verified" ||
-    data.creatorClaimStatus === "claim_wallet_active";
+    data.creatorClaimStatus === "verified";
   const showCreatorClaimState = isPostTip || isDirectTip;
   const showCreatorClaimPrompt = showCreatorClaimState && !isCreatorClaimed;
+  const claimCtaPath =
+    isDirectTip && (data.recipientHandle || data.authorHandle)
+      ? `/register?intent=x-tip&recipient=${encodeURIComponent(data.recipientHandle || data.authorHandle || "")}&amount=${encodeURIComponent(amountUsd)}`
+      : claimPath;
 
   return (
     <div className="tx-receipt-page">
@@ -463,14 +470,14 @@ export default function TxReceipt() {
           {data.displayAmount !== false && <div className="tx-receipt-amount">${amountUsd} USD</div>}
         </div>
 
-        {tweetUrl && !isDirectTip && (
+        {tweetUrl && (
           <div className="tx-receipt-tweet-card">
             <div className="tx-receipt-tweet-header">
               <img
-                src={xAvatarUrl(data.authorHandle) || "/logo.svg"}
+                src={xAvatarUrl(tweetAuthorHandle) || "/logo.svg"}
                 alt=""
                 className="tx-receipt-tweet-avatar"
-                onError={(event) => avatarErrorFallback(event, data.authorHandle)}
+                onError={(event) => avatarErrorFallback(event, tweetAuthorHandle)}
               />
               <div>
                 <p className="tx-receipt-tweet-handle">{tweetDisplayName}</p>
@@ -497,7 +504,7 @@ export default function TxReceipt() {
             Connect your X account in the Teep web app to claim tips sent to this creator profile. It only takes a moment.
           </p>
           <div className="tx-receipt-claim-actions">
-            <Link to={claimPath} className="tx-receipt-claim-cta">
+            <Link to={claimCtaPath} className="tx-receipt-claim-cta">
               Claim in web app
             </Link>
             <a href={CHROME_STORE_URL} target="_blank" rel="noopener noreferrer" className="tx-receipt-claim-secondary">
@@ -557,7 +564,6 @@ export default function TxReceipt() {
         </div>
         <div className="tx-receipt-footer-links">
           <Link to="/">About</Link>
-          <a href={DOCS_URL} target="_blank" rel="noopener noreferrer">Docs</a>
           <Link to="/privacy">Privacy</Link>
           <Link to="/terms">Terms</Link>
           <Link to="/support">Support</Link>

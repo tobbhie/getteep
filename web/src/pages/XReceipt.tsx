@@ -13,6 +13,8 @@ type XReceiptData = {
   displayAmount?: boolean;
   timestamp: number;
   authorHandle: string | null;
+  recipientHandle?: string | null;
+  tweetAuthorHandle?: string | null;
   tweetId: string | null;
   source: "x_bot";
   status: "completed" | "reserved" | string;
@@ -54,8 +56,10 @@ export default function XReceipt() {
   }, [receiptId]);
 
   const amount = data ? formatUsdRaw(data.amount) : "0.00";
-  const creator = data?.authorHandle ? `@${data.authorHandle}` : "Creator";
-  const tweetUrl = data?.authorHandle && data.tweetId ? `https://x.com/${data.authorHandle}/status/${data.tweetId.split(":")[0]}` : "";
+  const creatorHandle = data?.recipientHandle || data?.authorHandle || null;
+  const creator = creatorHandle ? `@${creatorHandle}` : "Creator";
+  const tweetAuthorHandle = data?.tweetAuthorHandle || data?.authorHandle || null;
+  const tweetUrl = tweetAuthorHandle && data?.tweetId ? `https://x.com/${tweetAuthorHandle}/status/${data.tweetId.split(":")[0]}` : "";
   const date = data ? new Date(data.timestamp * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "";
   const completed = data?.status === "completed";
 
@@ -110,13 +114,13 @@ export default function XReceipt() {
             <div className="tx-receipt-tweet-card">
               <div className="tx-receipt-tweet-header">
                 <img
-                  src={xAvatarUrl(data.authorHandle) || "/logo.svg"}
+                  src={xAvatarUrl(tweetAuthorHandle) || "/logo.svg"}
                   alt=""
                   className="tx-receipt-tweet-avatar"
-                  onError={(event) => avatarErrorFallback(event, data.authorHandle)}
+                  onError={(event) => avatarErrorFallback(event, tweetAuthorHandle)}
                 />
                 <div>
-                  <p className="tx-receipt-tweet-handle">{creator}</p>
+                  <p className="tx-receipt-tweet-handle">{tweetAuthorHandle ? `@${tweetAuthorHandle}` : creator}</p>
                   <p className="tx-receipt-tweet-time">{date}</p>
                 </div>
               </div>
@@ -144,7 +148,7 @@ export default function XReceipt() {
                   Connect the creator X account in Teep to make this reserved tip available.
                 </p>
                 <div className="tx-receipt-claim-actions">
-                  <Link to="/register?intent=x-tip" className="tx-receipt-claim-cta">
+                  <Link to={`/register?intent=x-tip&recipient=${encodeURIComponent(creatorHandle || "")}&amount=${encodeURIComponent(amount)}`} className="tx-receipt-claim-cta">
                     Continue in Teep
                   </Link>
                 </div>
