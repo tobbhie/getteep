@@ -10,6 +10,32 @@ import { verifyWalletProof } from "../services/walletAuth";
 
 const router = Router();
 
+type CreatorClaimStatus = "verified" | "unclaimed" | "claim_wallet_active";
+
+type XBotTipReceiptRow = {
+  sender_address: string;
+  recipient_address: string | null;
+  recipient_x_user_id: string;
+  recipient_x_username: string | null;
+  amount_raw: string;
+  source_tweet_id: string;
+  receipt_id: string;
+  tx_hash: string | null;
+  created_at: number;
+};
+
+type ClaimableTipReceiptRow = {
+  sender_address: string;
+  recipient_x_user_id?: string | null;
+  recipient_x_username: string;
+  amount_raw: string;
+  source_tweet_id: string;
+  receipt_id: string | null;
+  status: string;
+  created_at: number;
+  expires_at: number | null;
+};
+
 function contentIdFromPost(handle: string, tweetId: string): string {
   const canonical = `x.com/${handle.toLowerCase()}/status/${tweetId}`;
   return keccak256(toBytes(canonical));
@@ -17,6 +43,156 @@ function contentIdFromPost(handle: string, tweetId: string): string {
 
 function contentIdFromDirectCreator(authorId: string): string {
   return keccak256(toBytes(`teep:direct:x:${authorId}`));
+}
+
+function normalizeReceiptHandle(value?: string | null): string | null {
+  const normalized = (value || "").trim().replace(/^@/, "");
+  return normalized || null;
+}
+
+async function senderXHandle(db: ReturnType<typeof getDb>, senderAddress: string): Promise<string | null> {
+  const senderX = await db
+    .prepare(`SELECT x_username FROM x_accounts WHERE LOWER(user_address) = LOWER(?) ORDER BY verified_at DESC LIMIT 1`)
+    .get(senderAddress) as { x_username: string } | undefined;
+  return normalizeReceiptHandle(senderX?.x_username);
+}
+
+async function resolveCreatorClaimState(
+  db: ReturnType<typeof getDb>,
+  authorId: string,
+  handle?: string | null
+): Promise<{
+  recipientHandle: string | null;
+  creatorClaimStatus: CreatorClaimStatus;
+  creatorVerified: boolean;
+  creatorOwnerAddress: string | null;
+}> {
+  const normalizedHandle = normalizeReceiptHandle(handle);
+  const verifiedCreator = normalizedHandle
+    ? await db
+        .prepare(
+          `SELECT username, owner_address
+           FROM verified_claims
+           WHERE author_id = ? OR LOWER(username) = LOWER(?)
+           ORDER BY CASE WHEN author_id = ? THEN 0 ELSE 1 END, verified_at DESC
+           LIMIT 1`
+        )
+        .get(authorId, normalizedHandle, authorId) as { username: string; owner_address: string } | undefined
+    : await db
+        .prepare(
+          `SELECT username, owner_address
+           FROM verified_claims
+           WHERE author_id = ?
+           ORDER BY verified_at DESC
+           LIMIT 1`
+        )
+        .get(authorId) as { username: string; owner_address: string } | undefined;
+
+  if (verifiedCreator) {
+    return {
+      recipientHandle: normalizeReceiptHandle(verifiedCreator.username) || normalizedHandle,
+      creatorClaimStatus: "verified",
+      creatorVerified: true,
+      creatorOwnerAddress: verifiedCreator.owner_address,
+    };
+  }
+
+  const claimWallet = await db
+    .prepare(
+      `SELECT owner_address
+       FROM claim_wallets
+       WHERE author_id = ?
+         AND deployed_at_block > 0
+         AND COALESCE(tx_hash, '') <> ''
+       LIMIT 1`
+    )
+    .get(authorId) as { owner_address: string } | undefined;
+
+  if (claimWallet) {
+    return {
+      recipientHandle: normalizedHandle,
+      creatorClaimStatus: "claim_wallet_active",
+      creatorVerified: true,
+      creatorOwnerAddress: claimWallet.owner_address,
+    };
+  }
+
+  return {
+    recipientHandle: normalizedHandle,
+    creatorClaimStatus: "unclaimed",
+    creatorVerified: false,
+    creatorOwnerAddress: null,
+  };
+}
+
+async function buildXBotReceiptPayload(db: ReturnType<typeof getDb>, row: XBotTipReceiptRow) {
+  const [senderSettings, senderIdentity, senderHandle, creatorState] = await Promise.all([
+    getUserSettings(row.sender_address),
+    publicIdentity(row.sender_address),
+    senderXHandle(db, row.sender_address),
+    resolveCreatorClaimState(db, row.recipient_x_user_id, row.recipient_x_username),
+  ]);
+  const recipientHandle = creatorState.recipientHandle || normalizeReceiptHandle(row.recipient_x_username);
+  const tweetAuthorHandle = senderHandle || normalizeReceiptHandle(senderIdentity.label) || null;
+
+  return {
+    kind: "direct_creator_tip",
+    receiptId: row.receipt_id,
+    fromAddress: senderSettings.privacy.hideAddress ? null : row.sender_address,
+    fromIdentity: senderIdentity.label,
+    toAddress: row.recipient_address,
+    amount: row.amount_raw,
+    displayAmount: senderSettings.receipts.shareAmountEnabled,
+    txHash: row.tx_hash,
+    timestamp: Math.floor(Number(row.created_at || 0) / 1000),
+    authorId: row.recipient_x_user_id,
+    contentId: contentIdFromDirectCreator(row.recipient_x_user_id),
+    authorHandle: recipientHandle,
+    recipientHandle,
+    tweetAuthorHandle,
+    tweetId: row.source_tweet_id,
+    source: "x_bot",
+    status: "completed",
+    creatorClaimStatus: creatorState.creatorClaimStatus,
+    creatorVerified: creatorState.creatorVerified,
+    creatorOwnerAddress: creatorState.creatorOwnerAddress,
+    receiptPreferences: senderSettings.receipts,
+  };
+}
+
+async function buildClaimableReceiptPayload(db: ReturnType<typeof getDb>, row: ClaimableTipReceiptRow) {
+  const [senderSettings, senderIdentity, senderHandle] = await Promise.all([
+    getUserSettings(row.sender_address),
+    publicIdentity(row.sender_address),
+    senderXHandle(db, row.sender_address),
+  ]);
+  const recipientHandle = normalizeReceiptHandle(row.recipient_x_username);
+  const tweetAuthorHandle = senderHandle || normalizeReceiptHandle(senderIdentity.label) || null;
+
+  return {
+    kind: "direct_creator_tip",
+    receiptId: row.receipt_id,
+    fromAddress: senderSettings.privacy.hideAddress ? null : row.sender_address,
+    fromIdentity: senderIdentity.label,
+    toAddress: null,
+    amount: row.amount_raw,
+    displayAmount: senderSettings.receipts.shareAmountEnabled,
+    txHash: null,
+    timestamp: Math.floor(Number(row.created_at || 0) / 1000),
+    authorId: row.recipient_x_user_id || "",
+    contentId: row.recipient_x_user_id ? contentIdFromDirectCreator(row.recipient_x_user_id) : "",
+    authorHandle: recipientHandle,
+    recipientHandle,
+    tweetAuthorHandle,
+    tweetId: row.source_tweet_id,
+    source: "x_bot",
+    status: row.status === "unclaimed" ? "reserved" : row.status,
+    creatorClaimStatus: "unclaimed" as CreatorClaimStatus,
+    creatorVerified: false,
+    creatorOwnerAddress: null,
+    receiptPreferences: senderSettings.receipts,
+    expiresAt: row.expires_at ? Math.floor(Number(row.expires_at) / 1000) : null,
+  };
 }
 
 /**
@@ -97,6 +273,19 @@ router.get("/author/:authorId", async (req: Request, res: Response) => {
     )
     .get(authorId) as { total: number; count: number } | undefined;
 
+  const xBotTotal = await db
+    .prepare(
+      `SELECT COALESCE(SUM(CAST(xbt.amount_raw AS NUMERIC)), 0) as total, COUNT(*) as count
+       FROM x_bot_tips xbt
+       WHERE xbt.status = 'completed'
+         AND xbt.recipient_x_user_id = ?
+         AND NOT EXISTS (
+           SELECT 1 FROM tips t
+           WHERE xbt.tx_hash IS NOT NULL AND LOWER(t.tx_hash) = LOWER(xbt.tx_hash)
+         )`
+    )
+    .get(authorId) as { total: number; count: number } | undefined;
+
   const topPosts = await db
     .prepare(
       `SELECT content_id, SUM(CAST(amount AS NUMERIC)) as total, COUNT(*) as count
@@ -109,8 +298,8 @@ router.get("/author/:authorId", async (req: Request, res: Response) => {
 
   res.json({
     authorId,
-    totalReceived: total?.total?.toString() || "0",
-    tipCount: Number(total?.count || 0),
+    totalReceived: (Number(total?.total || 0) + Number(xBotTotal?.total || 0)).toString(),
+    tipCount: Number(total?.count || 0) + Number(xBotTotal?.count || 0),
     topPosts,
   });
 });
@@ -128,90 +317,29 @@ router.get("/receipt/x/:receiptId", async (req: Request, res: Response) => {
   const db = getDb();
   const row = await db
     .prepare(
-      `SELECT id, sender_address, recipient_address, recipient_x_user_id, recipient_x_username, amount_raw, source_tweet_id, tx_hash, created_at
+      `SELECT sender_address, recipient_address, recipient_x_user_id, recipient_x_username, amount_raw, source_tweet_id, receipt_id, tx_hash, created_at
        FROM x_bot_tips WHERE receipt_id = ?`
     )
-    .get(receiptId) as
-    | {
-        id: string;
-        sender_address: string;
-        recipient_address: string | null;
-        recipient_x_user_id: string;
-        recipient_x_username: string | null;
-        amount_raw: string;
-        source_tweet_id: string;
-        tx_hash: string;
-        created_at: number;
-      }
-    | undefined;
+    .get(receiptId) as XBotTipReceiptRow | undefined;
 
   if (row) {
-    const senderSettings = await getUserSettings(row.sender_address);
-    const senderX = await db
-      .prepare(`SELECT x_username FROM x_accounts WHERE LOWER(user_address) = LOWER(?) ORDER BY verified_at DESC LIMIT 1`)
-      .get(row.sender_address) as { x_username: string } | undefined;
-    res.json({
-      kind: "x_bot",
-      receiptId,
-      fromAddress: row.sender_address,
-      toAddress: row.recipient_address,
-      amount: row.amount_raw,
-      txHash: row.tx_hash,
-      displayAmount: senderSettings.receipts.shareAmountEnabled,
-      timestamp: Math.floor(row.created_at / 1000),
-      authorId: row.recipient_x_user_id,
-      authorHandle: row.recipient_x_username,
-      recipientHandle: row.recipient_x_username,
-      tweetAuthorHandle: senderX?.x_username || null,
-      tweetId: row.source_tweet_id,
-      source: "x_bot",
-      status: "completed",
-    });
+    res.json(await buildXBotReceiptPayload(db, row));
     return;
   }
 
   const claimable = await db
     .prepare(
-      `SELECT sender_address, recipient_x_username, amount_raw, source_tweet_id, status, created_at, expires_at
+      `SELECT sender_address, recipient_x_user_id, recipient_x_username, amount_raw, source_tweet_id, receipt_id, status, created_at, expires_at
        FROM claimable_tips WHERE receipt_id = ?`
     )
-    .get(receiptId) as
-    | {
-        sender_address: string;
-        recipient_x_username: string;
-        amount_raw: string;
-        source_tweet_id: string;
-        status: string;
-        created_at: number;
-        expires_at: number | null;
-      }
-    | undefined;
+    .get(receiptId) as ClaimableTipReceiptRow | undefined;
 
   if (!claimable) {
     res.status(404).json({ error: "Receipt not found" });
     return;
   }
 
-  const senderSettings = await getUserSettings(claimable.sender_address);
-  const senderX = await db
-    .prepare(`SELECT x_username FROM x_accounts WHERE LOWER(user_address) = LOWER(?) ORDER BY verified_at DESC LIMIT 1`)
-    .get(claimable.sender_address) as { x_username: string } | undefined;
-  res.json({
-    kind: "x_bot",
-    receiptId,
-    fromAddress: claimable.sender_address,
-    toAddress: null,
-    amount: claimable.amount_raw,
-    displayAmount: senderSettings.receipts.shareAmountEnabled,
-    timestamp: Math.floor(claimable.created_at / 1000),
-    authorHandle: claimable.recipient_x_username,
-    recipientHandle: claimable.recipient_x_username,
-    tweetAuthorHandle: senderX?.x_username || null,
-    tweetId: claimable.source_tweet_id,
-    source: "x_bot",
-    status: claimable.status === "unclaimed" ? "reserved" : claimable.status,
-    expiresAt: claimable.expires_at ? Math.floor(claimable.expires_at / 1000) : null,
-  });
+  res.json(await buildClaimableReceiptPayload(db, claimable));
 });
 
 /**
@@ -225,6 +353,20 @@ router.get("/receipt/:txHash", async (req: Request, res: Response) => {
     return;
   }
   const db = getDb();
+
+  const xBotTip = await db
+    .prepare(
+      `SELECT sender_address, recipient_address, recipient_x_user_id, recipient_x_username,
+              amount_raw, source_tweet_id, receipt_id, tx_hash, created_at
+       FROM x_bot_tips
+       WHERE LOWER(tx_hash) = ?
+       LIMIT 1`
+    )
+    .get(txHash) as XBotTipReceiptRow | undefined;
+  if (xBotTip) {
+    res.json(await buildXBotReceiptPayload(db, xBotTip));
+    return;
+  }
 
   const row = await db
     .prepare(
@@ -342,66 +484,6 @@ router.get("/receipt/:txHash", async (req: Request, res: Response) => {
         kind: "referral_fee_received",
         receiptPreferences: settings.receipts,
         accountIdentity: identity.label,
-      });
-      return;
-    }
-
-    const xBotTip = await db
-      .prepare(
-        `SELECT sender_address, recipient_address, recipient_x_user_id, recipient_x_username,
-                amount_raw, source_tweet_id, tx_hash, created_at
-         FROM x_bot_tips
-         WHERE LOWER(tx_hash) = ?
-         LIMIT 1`
-      )
-      .get(txHash) as
-      | {
-          sender_address: string;
-          recipient_address: string | null;
-          recipient_x_user_id: string;
-          recipient_x_username: string | null;
-          amount_raw: string;
-          source_tweet_id: string;
-          tx_hash: string;
-          created_at: number;
-        }
-      | undefined;
-    if (xBotTip) {
-      const senderSettings = await getUserSettings(xBotTip.sender_address);
-      const senderIdentity = await publicIdentity(xBotTip.sender_address);
-      const senderX = await db
-        .prepare(`SELECT x_username FROM x_accounts WHERE LOWER(user_address) = LOWER(?) ORDER BY verified_at DESC LIMIT 1`)
-        .get(xBotTip.sender_address) as { x_username: string } | undefined;
-      const verifiedCreator = xBotTip.recipient_x_username
-        ? await db
-            .prepare(
-              `SELECT username, owner_address
-               FROM verified_claims
-               WHERE author_id = ? OR LOWER(username) = LOWER(?)
-               ORDER BY CASE WHEN author_id = ? THEN 0 ELSE 1 END, verified_at DESC
-               LIMIT 1`
-            )
-            .get(xBotTip.recipient_x_user_id, xBotTip.recipient_x_username, xBotTip.recipient_x_user_id) as { username: string; owner_address: string } | undefined
-        : undefined;
-      res.json({
-        fromAddress: senderSettings.privacy.hideAddress ? null : xBotTip.sender_address,
-        fromIdentity: senderIdentity.label,
-        toAddress: xBotTip.recipient_address,
-        amount: xBotTip.amount_raw,
-        displayAmount: senderSettings.receipts.shareAmountEnabled,
-        txHash: xBotTip.tx_hash,
-        timestamp: Math.floor(xBotTip.created_at / 1000),
-        authorId: xBotTip.recipient_x_user_id,
-        contentId: "",
-        authorHandle: verifiedCreator?.username || xBotTip.recipient_x_username,
-        recipientHandle: verifiedCreator?.username || xBotTip.recipient_x_username,
-        tweetAuthorHandle: senderX?.x_username || senderIdentity.label?.replace(/^@/, "") || null,
-        tweetId: xBotTip.source_tweet_id,
-        kind: "direct_creator_tip",
-        creatorClaimStatus: verifiedCreator ? "verified" : "unclaimed",
-        creatorVerified: Boolean(verifiedCreator),
-        creatorOwnerAddress: verifiedCreator?.owner_address || null,
-        receiptPreferences: senderSettings.receipts,
       });
       return;
     }
@@ -534,17 +616,65 @@ router.get("/wallet/:address", async (req: Request, res: Response) => {
   const offset = parseInt(req.query.offset as string) || 0;
   const db = getDb();
 
-  const tips = await db
+  const indexedTips = await db
     .prepare(
       `SELECT t.content_id, t.author_id, t.amount, t.tx_hash, t.timestamp,
-              m.author_handle, m.tweet_id
+              m.author_handle, m.tweet_id, COALESCE(m.kind, 'post_tip') as kind,
+              'indexed' as source
        FROM tips t
        LEFT JOIN tip_metadata m ON t.content_id = m.content_id
        WHERE t.from_address = ?
        ORDER BY t.block_number DESC
-       LIMIT ? OFFSET ?`
+       LIMIT ?`
     )
-    .all(address, limit, offset);
+    .all(address, limit + offset) as Array<{
+      content_id: string;
+      author_id: string;
+      amount: string;
+      tx_hash: string;
+      timestamp: number;
+      author_handle: string | null;
+      tweet_id: string | null;
+      kind: string;
+      source: string;
+    }>;
+
+  const xBotTips = await db
+    .prepare(
+      `SELECT NULL as content_id,
+              xbt.recipient_x_user_id as author_id,
+              xbt.amount_raw as amount,
+              xbt.tx_hash,
+              CAST(xbt.created_at / 1000 AS INTEGER) as timestamp,
+              xbt.recipient_x_username as author_handle,
+              xbt.source_tweet_id as tweet_id,
+              'x_bot_tip' as kind,
+              'x_bot' as source
+       FROM x_bot_tips xbt
+       WHERE LOWER(xbt.sender_address) = ?
+         AND xbt.status = 'completed'
+         AND NOT EXISTS (
+           SELECT 1 FROM tips t
+           WHERE xbt.tx_hash IS NOT NULL AND LOWER(t.tx_hash) = LOWER(xbt.tx_hash)
+         )
+       ORDER BY xbt.created_at DESC
+       LIMIT ?`
+    )
+    .all(address, limit + offset) as Array<{
+      content_id: string | null;
+      author_id: string;
+      amount: string;
+      tx_hash: string;
+      timestamp: number;
+      author_handle: string | null;
+      tweet_id: string;
+      kind: string;
+      source: string;
+    }>;
+
+  const tips = [...indexedTips, ...xBotTips]
+    .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0))
+    .slice(offset, offset + limit);
 
   const stats = await getUnifiedTipperStats(address);
 

@@ -994,9 +994,23 @@ router.get("/creators/:username", async (req: Request, res: Response) => {
   const db = getDb();
 
   try {
-  const claim = await db
+  let claim = await db
     .prepare("SELECT author_id, username, display_name, profile_image_url FROM verified_claims WHERE LOWER(username) = ?")
     .get(username) as { author_id: string; username: string; display_name: string | null; profile_image_url: string | null } | undefined;
+  if (!claim) {
+    const linked = await db
+      .prepare(
+        `SELECT x_user_id as author_id, x_username as username
+         FROM x_accounts
+         WHERE LOWER(x_username) = ?
+         ORDER BY verified_at DESC
+         LIMIT 1`
+      )
+      .get(username) as { author_id: string; username: string } | undefined;
+    if (linked) {
+      claim = { author_id: linked.author_id, username: linked.username, display_name: null, profile_image_url: null };
+    }
+  }
 
   if (!claim) {
     err(res, 404, "Creator not found or not verified", "NOT_FOUND");
@@ -1008,6 +1022,18 @@ router.get("/creators/:username", async (req: Request, res: Response) => {
       `SELECT COALESCE(SUM(CAST(t.amount AS NUMERIC)), 0) as total, COUNT(*) as count
        FROM tips t LEFT JOIN tip_metadata m ON t.content_id = m.content_id
        WHERE ${creatorTipPredicate("t")}`
+    )
+    .get(claim.author_id, claim.username) as { total: string; count: string } | undefined;
+  const xBotTotal = await db
+    .prepare(
+      `SELECT COALESCE(SUM(CAST(xbt.amount_raw AS NUMERIC)), 0) as total, COUNT(*) as count
+       FROM x_bot_tips xbt
+       WHERE xbt.status = 'completed'
+         AND (xbt.recipient_x_user_id = ? OR LOWER(COALESCE(xbt.recipient_x_username, '')) = LOWER(?))
+         AND NOT EXISTS (
+           SELECT 1 FROM tips t
+           WHERE xbt.tx_hash IS NOT NULL AND LOWER(t.tx_hash) = LOWER(xbt.tx_hash)
+         )`
     )
     .get(claim.author_id, claim.username) as { total: string; count: string } | undefined;
 
@@ -1034,6 +1060,31 @@ router.get("/creators/:username", async (req: Request, res: Response) => {
        GROUP BY t.from_address ORDER BY total DESC LIMIT 10`
     )
     .all(claim.author_id, claim.username) as Array<{ from_address: string; total: string }>;
+  const xBotTopSupporters = await db
+    .prepare(
+      `SELECT xbt.sender_address as from_address, SUM(CAST(xbt.amount_raw AS NUMERIC)) as total
+       FROM x_bot_tips xbt
+       WHERE xbt.status = 'completed'
+         AND (xbt.recipient_x_user_id = ? OR LOWER(COALESCE(xbt.recipient_x_username, '')) = LOWER(?))
+         AND NOT EXISTS (
+           SELECT 1 FROM tips t
+           WHERE xbt.tx_hash IS NOT NULL AND LOWER(t.tx_hash) = LOWER(xbt.tx_hash)
+         )
+       GROUP BY xbt.sender_address
+       ORDER BY total DESC
+       LIMIT 10`
+    )
+    .all(claim.author_id, claim.username) as Array<{ from_address: string; total: string }>;
+  const supporterTotals = new Map<string, { from_address: string; total: number }>();
+  for (const supporter of [...topSupporters, ...xBotTopSupporters]) {
+    const key = supporter.from_address.toLowerCase();
+    const existing = supporterTotals.get(key) ?? { from_address: supporter.from_address, total: 0 };
+    existing.total += Number(supporter.total || 0);
+    supporterTotals.set(key, existing);
+  }
+  const mergedTopSupporters = Array.from(supporterTotals.values())
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 10);
 
   const recentTips = await db
     .prepare(
@@ -1045,10 +1096,35 @@ router.get("/creators/:username", async (req: Request, res: Response) => {
        LIMIT 100`
     )
     .all(claim.author_id, claim.username);
+  const xBotRecentTips = await db
+    .prepare(
+      `SELECT 'tip_received' as type,
+              xbt.amount_raw as amount,
+              xbt.tx_hash,
+              CAST(xbt.created_at / 1000 AS INTEGER) as timestamp,
+              xbt.sender_address as from_addr,
+              xbt.recipient_x_username as author_handle,
+              xbt.source_tweet_id as tweet_id
+       FROM x_bot_tips xbt
+       WHERE xbt.status = 'completed'
+         AND (xbt.recipient_x_user_id = ? OR LOWER(COALESCE(xbt.recipient_x_username, '')) = LOWER(?))
+         AND NOT EXISTS (
+           SELECT 1 FROM tips t
+           WHERE xbt.tx_hash IS NOT NULL AND LOWER(t.tx_hash) = LOWER(xbt.tx_hash)
+         )
+       ORDER BY xbt.created_at DESC
+       LIMIT 100`
+    )
+    .all(claim.author_id, claim.username);
+  const mergedRecentTips = [...(recentTips as Array<Record<string, any>>), ...(xBotRecentTips as Array<Record<string, any>>)]
+    .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0))
+    .slice(0, 100);
   const supporterIdentities = await resolveAddressIdentities([
-    ...topSupporters.map((supporter) => supporter.from_address),
-    ...(recentTips as Array<{ from_addr?: string | null }>).map((tip) => tip.from_addr || "").filter(Boolean),
+    ...mergedTopSupporters.map((supporter) => supporter.from_address),
+    ...mergedRecentTips.map((tip) => tip.from_addr || "").filter(Boolean),
   ]);
+  const totalReceivedRaw = Number(total?.total ?? 0) + Number(xBotTotal?.total ?? 0);
+  const totalTipCount = Number(total?.count ?? 0) + Number(xBotTotal?.count ?? 0);
 
   res.set("Cache-Control", "public, max-age=60");
   res.json({
@@ -1056,8 +1132,8 @@ router.get("/creators/:username", async (req: Request, res: Response) => {
     displayName: claim.display_name,
     profileImageUrl: claim.profile_image_url,
     authorId: claim.author_id,
-    totalReceivedUsd: (Number(total?.total ?? 0) / 1e6).toFixed(2),
-    tipCount: Number(total?.count ?? 0),
+    totalReceivedUsd: (totalReceivedRaw / 1e6).toFixed(2),
+    tipCount: totalTipCount,
     topPosts: topPosts.map((p) => ({
       contentId: p.content_id,
       totalUsd: (Number(p.total) / 1e6).toFixed(2),
@@ -1065,12 +1141,12 @@ router.get("/creators/:username", async (req: Request, res: Response) => {
       tweetId: p.tweet_id,
       authorHandle: p.author_handle,
     })),
-    topSupporters: topSupporters.map((s) => ({
+    topSupporters: mergedTopSupporters.map((s) => ({
       address: s.from_address,
       ...(supporterIdentities.get(s.from_address.toLowerCase()) ?? {}),
       totalUsd: (Number(s.total) / 1e6).toFixed(2),
     })),
-    recentTips: (recentTips as Array<Record<string, any>>).map((tip) => ({
+    recentTips: mergedRecentTips.map((tip) => ({
       ...tip,
       fromIdentity: tip.from_addr ? supporterIdentities.get(String(tip.from_addr).toLowerCase()) ?? null : null,
     })),
@@ -1281,13 +1357,33 @@ router.get("/stats", async (req: Request, res: Response) => {
   const tipsAgg = await db.prepare(
     `SELECT COUNT(*) as total_tips, COALESCE(SUM(CAST(amount AS NUMERIC)), 0) as total_volume, COUNT(DISTINCT from_address) as distinct_tippers FROM tips`
   ).get() as { total_tips: string; total_volume: string; distinct_tippers: string };
+  const xBotAgg = await db.prepare(
+    `SELECT COUNT(*) as total_tips, COALESCE(SUM(CAST(xbt.amount_raw AS NUMERIC)), 0) as total_volume
+     FROM x_bot_tips xbt
+     WHERE xbt.status = 'completed'
+       AND NOT EXISTS (
+         SELECT 1 FROM tips t
+         WHERE xbt.tx_hash IS NOT NULL AND LOWER(t.tx_hash) = LOWER(xbt.tx_hash)
+       )`
+  ).get() as { total_tips: string; total_volume: string };
+  const distinctTippers = await db.prepare(
+    `SELECT DISTINCT LOWER(from_address) as address FROM tips
+     UNION
+     SELECT DISTINCT LOWER(sender_address) as address
+     FROM x_bot_tips xbt
+     WHERE xbt.status = 'completed'
+       AND NOT EXISTS (
+         SELECT 1 FROM tips t
+         WHERE xbt.tx_hash IS NOT NULL AND LOWER(t.tx_hash) = LOWER(xbt.tx_hash)
+       )`
+  ).all() as Array<{ address: string }>;
   const creatorsCount = await db.prepare("SELECT COUNT(DISTINCT author_id) as count FROM verified_claims").get() as { count: string };
 
   res.set("Cache-Control", "public, max-age=60");
   res.json({
-    totalTips: Number(tipsAgg.total_tips),
-    totalVolumeUsd: (Number(tipsAgg.total_volume) / 1e6).toFixed(2),
-    distinctTippers: Number(tipsAgg.distinct_tippers),
+    totalTips: Number(tipsAgg.total_tips) + Number(xBotAgg.total_tips),
+    totalVolumeUsd: ((Number(tipsAgg.total_volume) + Number(xBotAgg.total_volume)) / 1e6).toFixed(2),
+    distinctTippers: distinctTippers.length,
     verifiedCreators: Number(creatorsCount.count),
   });
 });
@@ -1360,7 +1456,7 @@ router.get("/discover", async (req: Request, res: Response) => {
       profile_image_url: string | null;
     }>;
 
-  const creatorRows = await db
+  const indexedCreatorRows = await db
     .prepare(
       `SELECT
          t.author_id,
@@ -1440,6 +1536,132 @@ router.get("/discover", async (req: Request, res: Response) => {
       profile_image_url: string | null;
       latest_handle: string | null;
     }>;
+
+  const xBotCreatorRows = await db
+    .prepare(
+      `SELECT
+         xbt.recipient_x_user_id as author_id,
+         COALESCE(SUM(CAST(xbt.amount_raw AS NUMERIC)), 0) as total,
+         COUNT(*) as tip_count,
+         COUNT(DISTINCT xbt.sender_address) as unique_supporters,
+         0 as tipped_posts,
+         MAX(CAST(xbt.created_at / 1000 AS INTEGER)) as last_tip_at,
+         SUM(CASE WHEN CAST(xbt.created_at / 1000 AS INTEGER) >= ? THEN 1 ELSE 0 END) as recent_tip_count,
+         SUM(CASE WHEN CAST(xbt.created_at / 1000 AS INTEGER) >= ? THEN CAST(xbt.amount_raw AS NUMERIC) ELSE 0 END) as total_this_week,
+         (
+           SELECT username FROM verified_claims
+           WHERE author_id = xbt.recipient_x_user_id
+              OR LOWER(username) = LOWER(COALESCE(xbt.recipient_x_username, ''))
+           ORDER BY verified_at DESC
+           LIMIT 1
+         ) as claim_username,
+         (
+           SELECT x_username FROM x_accounts
+           WHERE x_user_id = xbt.recipient_x_user_id
+              OR LOWER(x_username) = LOWER(COALESCE(xbt.recipient_x_username, ''))
+           ORDER BY verified_at DESC
+           LIMIT 1
+         ) as linked_username,
+         (
+           SELECT display_name FROM verified_claims
+           WHERE author_id = xbt.recipient_x_user_id
+              OR LOWER(username) = LOWER(COALESCE(xbt.recipient_x_username, ''))
+           ORDER BY verified_at DESC
+           LIMIT 1
+         ) as display_name,
+         (
+           SELECT profile_image_url FROM verified_claims
+           WHERE author_id = xbt.recipient_x_user_id
+              OR LOWER(username) = LOWER(COALESCE(xbt.recipient_x_username, ''))
+           ORDER BY verified_at DESC
+           LIMIT 1
+         ) as profile_image_url,
+         xbt.recipient_x_username as latest_handle
+       FROM x_bot_tips xbt
+       WHERE xbt.status = 'completed'
+         AND NOT EXISTS (
+           SELECT 1 FROM tips t
+           WHERE xbt.tx_hash IS NOT NULL AND LOWER(t.tx_hash) = LOWER(xbt.tx_hash)
+         )
+       GROUP BY xbt.recipient_x_user_id, xbt.recipient_x_username
+       ORDER BY recent_tip_count DESC, unique_supporters DESC, total DESC
+       LIMIT 60`
+    )
+    .all(sevenDaysAgo, weekStart) as Array<{
+      author_id: string;
+      total: string;
+      tip_count: string;
+      unique_supporters: string;
+      tipped_posts: string;
+      last_tip_at: number;
+      recent_tip_count: string;
+      total_this_week: string;
+      claim_username: string | null;
+      linked_username: string | null;
+      display_name: string | null;
+      profile_image_url: string | null;
+      latest_handle: string | null;
+    }>;
+
+  const creatorRowMap = new Map<string, {
+    author_id: string;
+    total: string;
+    tip_count: string;
+    unique_supporters: string;
+    tipped_posts: string;
+    last_tip_at: number;
+    recent_tip_count: string;
+    total_this_week: string;
+    username: string | null;
+    display_name: string | null;
+    profile_image_url: string | null;
+    latest_handle: string | null;
+  }>();
+  for (const row of indexedCreatorRows) {
+    creatorRowMap.set(row.author_id, row);
+  }
+  for (const row of xBotCreatorRows) {
+    const existing = creatorRowMap.get(row.author_id);
+    const username = row.claim_username || row.linked_username || null;
+    if (!existing) {
+      creatorRowMap.set(row.author_id, {
+        author_id: row.author_id,
+        total: String(row.total || 0),
+        tip_count: String(row.tip_count || 0),
+        unique_supporters: String(row.unique_supporters || 0),
+        tipped_posts: String(row.tipped_posts || 0),
+        last_tip_at: Number(row.last_tip_at || 0),
+        recent_tip_count: String(row.recent_tip_count || 0),
+        total_this_week: String(row.total_this_week || 0),
+        username,
+        display_name: row.display_name,
+        profile_image_url: row.profile_image_url,
+        latest_handle: row.latest_handle,
+      });
+      continue;
+    }
+    creatorRowMap.set(row.author_id, {
+      ...existing,
+      total: String(Number(existing.total || 0) + Number(row.total || 0)),
+      tip_count: String(Number(existing.tip_count || 0) + Number(row.tip_count || 0)),
+      unique_supporters: String(Number(existing.unique_supporters || 0) + Number(row.unique_supporters || 0)),
+      tipped_posts: String(Number(existing.tipped_posts || 0) + Number(row.tipped_posts || 0)),
+      last_tip_at: Math.max(Number(existing.last_tip_at || 0), Number(row.last_tip_at || 0)),
+      recent_tip_count: String(Number(existing.recent_tip_count || 0) + Number(row.recent_tip_count || 0)),
+      total_this_week: String(Number(existing.total_this_week || 0) + Number(row.total_this_week || 0)),
+      username: existing.username || username,
+      display_name: existing.display_name || row.display_name,
+      profile_image_url: existing.profile_image_url || row.profile_image_url,
+      latest_handle: existing.latest_handle || row.latest_handle,
+    });
+  }
+  const creatorRows = Array.from(creatorRowMap.values())
+    .sort((a, b) =>
+      Number(b.recent_tip_count || 0) - Number(a.recent_tip_count || 0) ||
+      Number(b.unique_supporters || 0) - Number(a.unique_supporters || 0) ||
+      Number(b.total || 0) - Number(a.total || 0)
+    )
+    .slice(0, 60);
 
   const tippedBeforeAuthors = address
     ? new Set(
@@ -1726,9 +1948,122 @@ router.get("/discover/search", async (req: Request, res: Response) => {
       latest_handle: string | null;
     }>;
 
+    const xBotRows = await db
+      .prepare(
+        `SELECT
+           xbt.recipient_x_user_id as author_id,
+           COALESCE(SUM(CAST(xbt.amount_raw AS NUMERIC)), 0) as total,
+           COUNT(*) as tip_count,
+           COUNT(DISTINCT xbt.sender_address) as unique_supporters,
+           0 as tipped_posts,
+           MAX(CAST(xbt.created_at / 1000 AS INTEGER)) as last_tip_at,
+           SUM(CASE WHEN CAST(xbt.created_at / 1000 AS INTEGER) >= ? THEN 1 ELSE 0 END) as recent_tip_count,
+           (
+             SELECT username FROM verified_claims
+             WHERE author_id = xbt.recipient_x_user_id
+                OR LOWER(username) = LOWER(COALESCE(xbt.recipient_x_username, ''))
+             ORDER BY verified_at DESC
+             LIMIT 1
+           ) as claim_username,
+           (
+             SELECT x_username FROM x_accounts
+             WHERE x_user_id = xbt.recipient_x_user_id
+                OR LOWER(x_username) = LOWER(COALESCE(xbt.recipient_x_username, ''))
+             ORDER BY verified_at DESC
+             LIMIT 1
+           ) as linked_username,
+           (
+             SELECT display_name FROM verified_claims
+             WHERE author_id = xbt.recipient_x_user_id
+                OR LOWER(username) = LOWER(COALESCE(xbt.recipient_x_username, ''))
+             ORDER BY verified_at DESC
+             LIMIT 1
+           ) as display_name,
+           (
+             SELECT profile_image_url FROM verified_claims
+             WHERE author_id = xbt.recipient_x_user_id
+                OR LOWER(username) = LOWER(COALESCE(xbt.recipient_x_username, ''))
+             ORDER BY verified_at DESC
+             LIMIT 1
+           ) as profile_image_url,
+           xbt.recipient_x_username as latest_handle
+         FROM x_bot_tips xbt
+         WHERE xbt.status = 'completed'
+           AND NOT EXISTS (
+             SELECT 1 FROM tips t
+             WHERE xbt.tx_hash IS NOT NULL AND LOWER(t.tx_hash) = LOWER(xbt.tx_hash)
+           )
+         GROUP BY xbt.recipient_x_user_id, xbt.recipient_x_username
+         HAVING LOWER(COALESCE(
+             (SELECT username FROM verified_claims WHERE author_id = xbt.recipient_x_user_id ORDER BY verified_at DESC LIMIT 1),
+             (SELECT x_username FROM x_accounts WHERE x_user_id = xbt.recipient_x_user_id ORDER BY verified_at DESC LIMIT 1),
+             xbt.recipient_x_username,
+             ''
+           )) LIKE ?
+           OR LOWER(COALESCE(
+             (SELECT display_name FROM verified_claims WHERE author_id = xbt.recipient_x_user_id ORDER BY verified_at DESC LIMIT 1),
+             ''
+           )) LIKE ?
+           OR LOWER(xbt.recipient_x_user_id) LIKE ?
+         ORDER BY last_tip_at DESC, total DESC
+         LIMIT ?`
+      )
+      .all(sevenDaysAgo, like, like, like, limit) as Array<{
+        author_id: string;
+        total: string;
+        tip_count: string;
+        unique_supporters: string;
+        tipped_posts: string;
+        last_tip_at: number;
+        recent_tip_count: string;
+        claim_username: string | null;
+        linked_username: string | null;
+        display_name: string | null;
+        profile_image_url: string | null;
+        latest_handle: string | null;
+      }>;
+
+    const searchRowsByAuthor = new Map<string, typeof rows[number]>();
+    for (const row of rows) searchRowsByAuthor.set(row.author_id, row);
+    for (const row of xBotRows) {
+      const existing = searchRowsByAuthor.get(row.author_id);
+      const username = row.claim_username || row.linked_username || null;
+      if (!existing) {
+        searchRowsByAuthor.set(row.author_id, {
+          author_id: row.author_id,
+          total: String(row.total || 0),
+          tip_count: String(row.tip_count || 0),
+          unique_supporters: String(row.unique_supporters || 0),
+          tipped_posts: String(row.tipped_posts || 0),
+          last_tip_at: Number(row.last_tip_at || 0),
+          recent_tip_count: String(row.recent_tip_count || 0),
+          username,
+          display_name: row.display_name,
+          profile_image_url: row.profile_image_url,
+          latest_handle: row.latest_handle,
+        });
+        continue;
+      }
+      searchRowsByAuthor.set(row.author_id, {
+        ...existing,
+        total: String(Number(existing.total || 0) + Number(row.total || 0)),
+        tip_count: String(Number(existing.tip_count || 0) + Number(row.tip_count || 0)),
+        unique_supporters: String(Number(existing.unique_supporters || 0) + Number(row.unique_supporters || 0)),
+        last_tip_at: Math.max(Number(existing.last_tip_at || 0), Number(row.last_tip_at || 0)),
+        recent_tip_count: String(Number(existing.recent_tip_count || 0) + Number(row.recent_tip_count || 0)),
+        username: existing.username || username,
+        display_name: existing.display_name || row.display_name,
+        profile_image_url: existing.profile_image_url || row.profile_image_url,
+        latest_handle: existing.latest_handle || row.latest_handle,
+      });
+    }
+    const mergedRows = Array.from(searchRowsByAuthor.values())
+      .sort((a, b) => Number(b.last_tip_at || 0) - Number(a.last_tip_at || 0) || Number(b.total || 0) - Number(a.total || 0))
+      .slice(0, limit);
+
     res.set("Cache-Control", "private, max-age=10");
     res.json({
-      results: rows.map((row) => {
+      results: mergedRows.map((row) => {
         const isVerified = Boolean(row.username);
         const handle = (row.username || row.latest_handle || "").replace(/^@/, "");
         return {
@@ -1775,8 +2110,37 @@ router.get("/leaderboard/creators", async (req: Request, res: Response) => {
       `SELECT t.author_id, SUM(CAST(t.amount AS NUMERIC)) as total FROM tips t ${whereClause} GROUP BY t.author_id ORDER BY total DESC LIMIT ?`
     )
     .all(...args) as Array<{ author_id: string; total: string }>;
+  const xBotWhere = since != null
+    ? `WHERE xbt.status = 'completed'
+         AND CAST(xbt.created_at / 1000 AS INTEGER) >= ?
+         AND xbt.recipient_x_user_id IN (SELECT author_id FROM verified_claims)
+         AND NOT EXISTS (
+           SELECT 1 FROM tips t
+           WHERE xbt.tx_hash IS NOT NULL AND LOWER(t.tx_hash) = LOWER(xbt.tx_hash)
+         )`
+    : `WHERE xbt.status = 'completed'
+         AND xbt.recipient_x_user_id IN (SELECT author_id FROM verified_claims)
+         AND NOT EXISTS (
+           SELECT 1 FROM tips t
+           WHERE xbt.tx_hash IS NOT NULL AND LOWER(t.tx_hash) = LOWER(xbt.tx_hash)
+         )`;
+  const xBotRows = await db
+    .prepare(
+      `SELECT xbt.recipient_x_user_id as author_id, SUM(CAST(xbt.amount_raw AS NUMERIC)) as total
+       FROM x_bot_tips xbt
+       ${xBotWhere}
+       GROUP BY xbt.recipient_x_user_id`
+    )
+    .all(...(since != null ? [since] : [])) as Array<{ author_id: string; total: string }>;
+  const merged = new Map<string, { author_id: string; total: number }>();
+  for (const row of [...rows, ...xBotRows]) {
+    const existing = merged.get(row.author_id) ?? { author_id: row.author_id, total: 0 };
+    existing.total += Number(row.total || 0);
+    merged.set(row.author_id, existing);
+  }
+  const mergedRows = Array.from(merged.values()).sort((a, b) => b.total - a.total).slice(0, limit);
 
-  const authorIds = rows.map((r) => r.author_id);
+  const authorIds = mergedRows.map((r) => r.author_id);
   const claims =
     authorIds.length > 0
       ? (await db
@@ -1785,7 +2149,7 @@ router.get("/leaderboard/creators", async (req: Request, res: Response) => {
       : [];
   const byAuthor = Object.fromEntries(claims.map((c) => [c.author_id, { username: c.username, displayName: c.display_name }]));
 
-  const creators = rows.map((r, i) => ({
+  const creators = mergedRows.map((r, i) => ({
     rank: i + 1,
     authorId: r.author_id,
     username: byAuthor[r.author_id]?.username ?? null,
@@ -1812,8 +2176,35 @@ router.get("/leaderboard/tippers", async (req: Request, res: Response) => {
       `SELECT from_address, SUM(CAST(amount AS NUMERIC)) as total FROM tips ${whereClause} GROUP BY from_address ORDER BY total DESC LIMIT ?`
     )
     .all(...args) as Array<{ from_address: string; total: string }>;
+  const xBotWhere = since != null
+    ? `WHERE status = 'completed'
+         AND CAST(created_at / 1000 AS INTEGER) >= ?
+         AND NOT EXISTS (
+           SELECT 1 FROM tips t
+           WHERE x_bot_tips.tx_hash IS NOT NULL AND LOWER(t.tx_hash) = LOWER(x_bot_tips.tx_hash)
+         )`
+    : `WHERE status = 'completed'
+         AND NOT EXISTS (
+           SELECT 1 FROM tips t
+           WHERE x_bot_tips.tx_hash IS NOT NULL AND LOWER(t.tx_hash) = LOWER(x_bot_tips.tx_hash)
+         )`;
+  const xBotRows = await db
+    .prepare(
+      `SELECT sender_address as from_address, SUM(CAST(amount_raw AS NUMERIC)) as total
+       FROM x_bot_tips
+       ${xBotWhere}
+       GROUP BY sender_address`
+    )
+    .all(...(since != null ? [since] : [])) as Array<{ from_address: string; total: string }>;
+  const merged = new Map<string, { from_address: string; total: number }>();
+  for (const row of [...rows, ...xBotRows]) {
+    const key = row.from_address.toLowerCase();
+    const existing = merged.get(key) ?? { from_address: row.from_address, total: 0 };
+    existing.total += Number(row.total || 0);
+    merged.set(key, existing);
+  }
 
-  const tippers = rows.map((r, i) => ({
+  const tippers = Array.from(merged.values()).sort((a, b) => b.total - a.total).slice(0, limit).map((r, i) => ({
     rank: i + 1,
     address: r.from_address,
     totalSentUsd: (Number(r.total) / 1e6).toFixed(2),

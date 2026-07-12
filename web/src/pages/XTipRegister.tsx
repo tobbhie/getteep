@@ -1,15 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
 import { API_BASE } from "../config";
+import { avatarErrorFallback, localInitialsAvatar, xAvatarUrl } from "../lib/avatar";
 
 type ClaimStatus = {
   verified: boolean;
   claims?: Array<{ username: string; display_name?: string | null; profile_image_url?: string | null }>;
 };
 
-function cleanHandle(value: string | null) {
+type XTipReceipt = {
+  receiptId: string;
+  amount: string;
+  authorHandle: string | null;
+  recipientHandle?: string | null;
+  status?: string;
+  txHash?: string | null;
+};
+
+function cleanHandle(value: string | null | undefined) {
   return (value || "").replace(/^@/, "").trim().toLowerCase();
 }
 
@@ -18,13 +29,23 @@ function cleanAmount(value: string | null) {
   return /^\d+(\.\d{1,2})?$/.test(normalized) ? normalized : "";
 }
 
+function cleanReceiptId(value: string | null) {
+  const normalized = (value || "").trim();
+  return /^[a-f0-9]{16}$/i.test(normalized) ? normalized : "";
+}
+
+function formatUsdRaw(raw?: string | null): string {
+  const value = Number(raw || "0") / 1e6;
+  return Number.isFinite(value) ? value.toFixed(2) : "";
+}
+
 function appendParams(path: string, params: URLSearchParams) {
   const next = new URLSearchParams();
   const [base, existingQuery] = path.split("?");
   if (existingQuery) {
     new URLSearchParams(existingQuery).forEach((value, key) => next.set(key, value));
   }
-  for (const key of ["intent", "tweetId", "recipient", "amount"]) {
+  for (const key of ["intent", "tweetId", "recipient", "amount", "receipt"]) {
     const value = params.get(key);
     if (value) next.set(key, value);
   }
@@ -52,20 +73,75 @@ function privyDisplayName(user: unknown, fallbackAddress: string) {
   );
 }
 
+function PageMessage({ title, body, cta }: { title: string; body?: string; cta?: ReactNode }) {
+  return (
+    <main className="x-tip-link-page">
+      <section className="x-tip-link-card x-tip-link-card--message">
+        <p className="eyebrow">Teep claim link</p>
+        <h1>{title}</h1>
+        {body && <p>{body}</p>}
+        {cta}
+      </section>
+    </main>
+  );
+}
+
 export default function XTipRegister() {
   const [searchParams] = useSearchParams();
   const { ready, authenticated, user, login } = usePrivy();
   const { wallets } = useWallets();
   const { client: smartWalletClient } = useSmartWallets();
   const [claimStatus, setClaimStatus] = useState<ClaimStatus | null>(null);
+  const [receipt, setReceipt] = useState<XTipReceipt | null>(null);
+  const [receiptLoading, setReceiptLoading] = useState(false);
+  const [receiptError, setReceiptError] = useState("");
 
   const embeddedWallet = wallets.find((wallet) => wallet.walletClientType === "privy");
   const address = (smartWalletClient?.account?.address || embeddedWallet?.address || (user?.wallet as { address?: string } | undefined)?.address || "").toLowerCase();
-  const recipient = cleanHandle(searchParams.get("recipient"));
-  const amount = cleanAmount(searchParams.get("amount"));
+  const receiptId = cleanReceiptId(searchParams.get("receipt") || searchParams.get("receiptId"));
+  const queryRecipient = cleanHandle(searchParams.get("recipient"));
+  const queryAmount = cleanAmount(searchParams.get("amount"));
   const intent = searchParams.get("intent") || "x-tip";
-  const isTipIntent = intent === "x-tip" && recipient && amount;
+
+  useEffect(() => {
+    if (!receiptId) {
+      setReceipt(null);
+      setReceiptError("");
+      setReceiptLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setReceiptLoading(true);
+    setReceiptError("");
+    fetch(`${API_BASE}/tips/receipt/x/${receiptId}`, { headers: { Accept: "application/json" } })
+      .then((response) => {
+        if (!response.ok) throw new Error(response.status === 404 ? "This claim link could not be found." : "Could not verify this claim link.");
+        return response.json();
+      })
+      .then((payload: XTipReceipt) => {
+        if (!cancelled) setReceipt(payload);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setReceipt(null);
+          setReceiptError(error instanceof Error ? error.message : "Could not verify this claim link.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setReceiptLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [receiptId]);
+
+  const recipient = cleanHandle(receipt?.recipientHandle || receipt?.authorHandle) || queryRecipient;
+  const amount = receipt ? formatUsdRaw(receipt.amount) : queryAmount;
+  const isTipIntent = intent === "x-tip" && recipient && (amount || receiptId);
   const claimPath = appendParams("/dashboard?claim=creator", searchParams);
+  const avatarSrc = xAvatarUrl(recipient) || localInitialsAvatar(recipient);
+  const headline = amount ? `$${amount} is reserved for @${recipient}` : `A tip is reserved for @${recipient}`;
+  const hasReceiptSource = Boolean(receipt);
 
   useEffect(() => {
     if (!address) {
@@ -96,130 +172,91 @@ export default function XTipRegister() {
   }, [claimStatus, recipient]);
   const signedInName = matchingClaim?.display_name || (matchingClaim?.username ? `@${matchingClaim.username}` : privyDisplayName(user, address));
 
-  const shareText = isTipIntent
-    ? `@${recipient}, you have a $${amount} tip waiting on Teep. Claim it here: ${window.location.href}`
-    : `Claim your Teep tip here: ${window.location.href}`;
+  const shareText =
+    isTipIntent && amount
+      ? `@${recipient}, you have a $${amount} tip waiting on Teep. Claim it here: ${window.location.href}`
+      : `@${recipient}, you have a tip waiting on Teep. Claim it here: ${window.location.href}`;
   const shareUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}`;
 
-  if (!ready) {
+  if (!ready || receiptLoading) {
+    return <PageMessage title="Preparing this tip." body="Checking the claim link before showing the details." />;
+  }
+
+  if (receiptId && receiptError && !queryRecipient) {
     return (
-      <main className="x-tip-link-page">
-        <header className="x-tip-link-topbar">
-          <Link to="/" className="x-tip-link-brand">
-            <img src="/logo.svg" alt="" />
-            <span>Teep</span>
-          </Link>
-        </header>
-        <section className="x-tip-link-card">
-          <p className="eyebrow">Teep claim link</p>
-          <h1>Preparing this tip.</h1>
-        </section>
-      </main>
+      <PageMessage
+        title="This claim link is unavailable."
+        body={receiptError}
+        cta={<Link to="/" className="btn-primary">Back to Teep</Link>}
+      />
     );
   }
 
   if (!isTipIntent) {
     return (
-      <main className="x-tip-link-page">
-        <header className="x-tip-link-topbar">
-          <Link to="/" className="x-tip-link-brand">
-            <img src="/logo.svg" alt="" />
-            <span>Teep</span>
-          </Link>
-        </header>
-        <section className="x-tip-link-card">
-          <p className="eyebrow">Teep claim link</p>
-          <h1>This link is incomplete.</h1>
-          <p>Open the claim link from the Teep reply on X, or launch Teep to continue.</p>
-          <Link to="/dashboard" className="btn-primary">Launch App</Link>
-        </section>
-      </main>
+      <PageMessage
+        title="This link is incomplete."
+        body="Open the claim link from the Teep reply on X, or launch Teep to continue."
+        cta={<Link to="/dashboard" className="btn-primary">Launch App</Link>}
+      />
     );
   }
 
-  if (!authenticated) {
-    return (
-      <main className="x-tip-link-page">
-        <header className="x-tip-link-topbar">
-          <Link to="/" className="x-tip-link-brand">
-            <img src="/logo.svg" alt="" />
-            <span>Teep</span>
-          </Link>
-        </header>
-        <section className="x-tip-link-hero x-tip-link-hero--claim">
-          <span className="x-tip-link-badge">Tip waiting</span>
-          <div className="x-tip-link-avatar" aria-hidden>
-            <span>@</span>
-          </div>
-          <h1>${amount} is reserved for @{recipient}</h1>
-          <p>This tip is waiting for @{recipient}. Continue with Teep, then connect that X account to claim it.</p>
-          <div className="x-tip-link-panel">
-            <div className="x-tip-link-summary" aria-label="Reserved tip details">
-              <div>
-                <span>Recipient</span>
-                <strong>@{recipient}</strong>
-              </div>
-              <div>
-                <span>Tip amount</span>
-                <strong>${amount}</strong>
-              </div>
-            </div>
-            <button type="button" onClick={login} className="btn-primary x-tip-link-primary">
-              I am this creator
-            </button>
-            <a href={shareUrl} target="_blank" rel="noopener noreferrer" className="btn-secondary x-tip-link-primary">
-              Share link
-            </a>
-          </div>
-        </section>
-      </main>
-    );
-  }
+  const intro = !authenticated
+    ? `Continue with Teep, then connect @${recipient} on X to claim this tip.`
+    : linkedRecipient
+      ? `You are signed in as ${signedInName}. Finish the claim flow to make this tip available.`
+      : `You are signed in as ${signedInName}. This claim link is for @${recipient}. If that is not you, share it with them.`;
 
   return (
     <main className="x-tip-link-page">
-      <header className="x-tip-link-topbar">
-        <Link to="/" className="x-tip-link-brand">
-          <img src="/logo.svg" alt="" />
-          <span>Teep</span>
-        </Link>
-      </header>
-      <section className="x-tip-link-hero x-tip-link-hero--claim">
-        <span className="x-tip-link-badge">Tip waiting</span>
-        <div className="x-tip-link-avatar" aria-hidden>
-          <span>{recipient.slice(0, 2).toUpperCase()}</span>
+      <section className="x-tip-link-claim-shell">
+        <div className="x-tip-link-claim-copy">
+          <span className="x-tip-link-badge">Tip waiting</span>
+          <img
+            src={avatarSrc}
+            alt=""
+            className="x-tip-link-avatar-img"
+            onError={(event) => avatarErrorFallback(event, recipient)}
+          />
+          <h1>{headline}</h1>
+          <p>{intro}</p>
         </div>
-        <h1>${amount} is reserved for @{recipient}</h1>
-        {linkedRecipient ? (
-          <p>
-            You are signed in as {signedInName}. Finish the claim flow to make this tip available.
-          </p>
-        ) : (
-          <p>
-            You are signed in as {signedInName}. This claim link is for @{recipient}. If that is not you, share the link with them.
-          </p>
-        )}
 
-        <div className="x-tip-link-panel">
+        <div className="x-tip-link-panel x-tip-link-panel--claim">
           <div className="x-tip-link-summary" aria-label="Reserved tip details">
             <div>
               <span>Recipient</span>
               <strong>@{recipient}</strong>
             </div>
             <div>
-              <span>Signed in as</span>
-              <strong>{signedInName}</strong>
+              <span>{authenticated ? "Signed in as" : "Claim action"}</span>
+              <strong>{authenticated ? signedInName : "Verify with X"}</strong>
             </div>
-            <div>
-              <span>Tip amount</span>
-              <strong>${amount}</strong>
-            </div>
+            {amount && (
+              <div>
+                <span>{hasReceiptSource ? "Reserved tip" : "Requested tip"}</span>
+                <strong>${amount}</strong>
+              </div>
+            )}
           </div>
 
+          {!hasReceiptSource && (
+            <p className="x-tip-link-note">
+              This is an older claim link. Teep will confirm the actual reserved tips during creator verification.
+            </p>
+          )}
+
           <div className="x-tip-link-actions">
-            <Link to={claimPath} className="btn-primary">
-              {linkedRecipient ? "Finish claim" : "I am this creator"}
-            </Link>
+            {authenticated ? (
+              <Link to={claimPath} className="btn-primary">
+                {linkedRecipient ? "Finish claim" : "I am this creator"}
+              </Link>
+            ) : (
+              <button type="button" onClick={login} className="btn-primary">
+                I am this creator
+              </button>
+            )}
             <a href={shareUrl} target="_blank" rel="noopener noreferrer" className="btn-secondary">
               Share with @{recipient}
             </a>

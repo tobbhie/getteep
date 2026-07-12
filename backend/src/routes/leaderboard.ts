@@ -53,14 +53,51 @@ router.get("/creators", async (req: Request, res: Response) => {
     total: number;
     tip_count: number;
   }>;
+  const xBotWhere = period.since != null
+    ? `WHERE xbt.status = 'completed'
+         AND CAST(xbt.created_at / 1000 AS INTEGER) >= ?
+         AND xbt.recipient_x_user_id IN (SELECT author_id FROM verified_claims)
+         AND NOT EXISTS (
+           SELECT 1 FROM tips t
+           WHERE xbt.tx_hash IS NOT NULL AND LOWER(t.tx_hash) = LOWER(xbt.tx_hash)
+         )`
+    : `WHERE xbt.status = 'completed'
+         AND xbt.recipient_x_user_id IN (SELECT author_id FROM verified_claims)
+         AND NOT EXISTS (
+           SELECT 1 FROM tips t
+           WHERE xbt.tx_hash IS NOT NULL AND LOWER(t.tx_hash) = LOWER(xbt.tx_hash)
+         )`;
+  const xBotRows = await db.prepare(
+    `SELECT xbt.recipient_x_user_id as author_id,
+            SUM(CAST(xbt.amount_raw AS NUMERIC)) as total,
+            COUNT(*) as tip_count
+     FROM x_bot_tips xbt
+     ${xBotWhere}
+     GROUP BY xbt.recipient_x_user_id`
+  ).all(...(period.since != null ? [period.since] : [])) as Array<{
+    author_id: string;
+    total: number;
+    tip_count: number;
+  }>;
 
-  if (rows.length === 0) {
+  const mergedByAuthor = new Map<string, { author_id: string; total: number; tip_count: number }>();
+  for (const row of [...rows, ...xBotRows]) {
+    const existing = mergedByAuthor.get(row.author_id) ?? { author_id: row.author_id, total: 0, tip_count: 0 };
+    existing.total += Number(row.total || 0);
+    existing.tip_count += Number(row.tip_count || 0);
+    mergedByAuthor.set(row.author_id, existing);
+  }
+  const mergedRows = Array.from(mergedByAuthor.values())
+    .sort((a, b) => b.total - a.total)
+    .slice(0, limit);
+
+  if (mergedRows.length === 0) {
     res.set("Cache-Control", "public, max-age=60");
     res.json({ creators: [] });
     return;
   }
 
-  const authorIds = rows.map((r) => r.author_id);
+  const authorIds = mergedRows.map((r) => r.author_id);
   const claims = await db.prepare(
     "SELECT author_id, username, display_name, profile_image_url FROM verified_claims WHERE author_id IN (" +
     authorIds.map(() => "?").join(",") +
@@ -71,7 +108,7 @@ router.get("/creators", async (req: Request, res: Response) => {
     claims.map((c) => [c.author_id, { username: c.username, displayName: c.display_name, profileImageUrl: c.profile_image_url }])
   );
 
-  const creators = rows.map((r, i) => ({
+  const creators = mergedRows.map((r, i) => ({
     rank: i + 1,
     authorId: r.author_id,
     username: byAuthor[r.author_id]?.username ?? null,
@@ -113,8 +150,37 @@ router.get("/tippers", async (req: Request, res: Response) => {
      ORDER BY total DESC
      LIMIT ?`
   ).all(...args) as Array<{ from_address: string; total: number }>;
+  const xBotWhere = period.since != null
+    ? `WHERE status = 'completed'
+         AND CAST(created_at / 1000 AS INTEGER) >= ?
+         AND NOT EXISTS (
+           SELECT 1 FROM tips t
+           WHERE x_bot_tips.tx_hash IS NOT NULL AND LOWER(t.tx_hash) = LOWER(x_bot_tips.tx_hash)
+         )`
+    : `WHERE status = 'completed'
+         AND NOT EXISTS (
+           SELECT 1 FROM tips t
+           WHERE x_bot_tips.tx_hash IS NOT NULL AND LOWER(t.tx_hash) = LOWER(x_bot_tips.tx_hash)
+         )`;
+  const xBotRows = await db.prepare(
+    `SELECT sender_address as from_address, SUM(CAST(amount_raw AS NUMERIC)) as total
+     FROM x_bot_tips
+     ${xBotWhere}
+     GROUP BY sender_address`
+  ).all(...(period.since != null ? [period.since] : [])) as Array<{ from_address: string; total: number }>;
 
-  const tippers = rows.map((r, i) => ({
+  const mergedByTipper = new Map<string, { from_address: string; total: number }>();
+  for (const row of [...rows, ...xBotRows]) {
+    const key = row.from_address.toLowerCase();
+    const existing = mergedByTipper.get(key) ?? { from_address: row.from_address, total: 0 };
+    existing.total += Number(row.total || 0);
+    mergedByTipper.set(key, existing);
+  }
+
+  const tippers = Array.from(mergedByTipper.values())
+    .sort((a, b) => b.total - a.total)
+    .slice(0, limit)
+    .map((r, i) => ({
     rank: i + 1,
     address: r.from_address,
     totalSentUsd: (r.total / 1e6).toFixed(2),

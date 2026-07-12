@@ -375,6 +375,11 @@ router.get("/x/callback", async (req: Request, res: Response) => {
       );
 
       const claimResult = await claimPendingTipsForXUser(profile.id, ownerAddress);
+      await createCreatorClaimedNotifications({
+        authorId: authorIdForDb,
+        username: profile.username,
+        ownerAddress,
+      });
       console.log(
         `[Auth] X tipping linked: @${profile.username} (${profile.id}) -> ${ownerAddress} (claimed ${claimResult.claimedCount})`
       );
@@ -624,8 +629,8 @@ router.get("/claim-wallet-status/:address", async (req: Request, res: Response) 
   const factoryAddress = process.env.FACTORY_ADDRESS as `0x${string}` | undefined;
   const rpcUrl = getRpcUrl();
   const row = await db.prepare(
-    "SELECT wallet_address FROM claim_wallets WHERE author_id = ?"
-  ).get(authorIdForChain) as { wallet_address: string } | undefined;
+    "SELECT wallet_address, deployed_at_block, tx_hash FROM claim_wallets WHERE author_id = ?"
+  ).get(authorIdForChain) as { wallet_address: string; deployed_at_block: string | number; tx_hash: string } | undefined;
 
   if (factoryAddress && rpcUrl) {
     try {
@@ -662,18 +667,6 @@ router.get("/claim-wallet-status/:address", async (req: Request, res: Response) 
         }
       }
 
-      // Sync DB so claim_wallets matches current contract for future lookups
-      if (!row || row.wallet_address?.toLowerCase() !== claimWalletAddress) {
-        try {
-          await db.prepare(
-            "INSERT INTO claim_wallets (author_id, wallet_address, owner_address, deployed_at_block, tx_hash) VALUES (?, ?, ?, 0, '') ON CONFLICT(author_id) DO UPDATE SET wallet_address = excluded.wallet_address, owner_address = excluded.owner_address"
-          ).run(authorIdForChain, claimWalletAddress, address);
-          if (DEBUG) console.log("[Teep:Backend] claim-wallet-status: synced claim_wallets with chain address");
-        } catch (e) {
-          if (DEBUG) console.warn("[Teep:Backend] claim-wallet-status: failed to sync claim_wallets", e);
-        }
-      }
-
       res.json({
         deployed: !!deployed,
         claimWalletAddress,
@@ -686,7 +679,12 @@ router.get("/claim-wallet-status/:address", async (req: Request, res: Response) 
   }
 
   // Fallback when chain not configured: use indexer DB
-  if (row) {
+  const isIndexedDeployment =
+    row &&
+    Number(row.deployed_at_block || 0) > 0 &&
+    typeof row.tx_hash === "string" &&
+    row.tx_hash.trim().length > 0;
+  if (isIndexedDeployment) {
     if (DEBUG) console.log("[Teep:Backend] claim-wallet-status: from DB", { claimWalletAddress: row.wallet_address?.slice(0, 10) + "…" });
     const claimWalletAddress = row.wallet_address.toLowerCase();
     res.json({

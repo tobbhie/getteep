@@ -111,7 +111,7 @@ async function receiptMetaBlock(txHash: string, req: Request): Promise<string> {
   const base = baseUrl(req);
   const canonical = `${base}/tx/${encodeURIComponent(txHash)}`;
   const db = getDb();
-  const tip = await db
+  let tip = await db
     .prepare(
       `SELECT t.amount, t.tx_hash, t.from_address, t.author_id, t.timestamp, m.author_handle
        FROM tips t
@@ -123,6 +123,24 @@ async function receiptMetaBlock(txHash: string, req: Request): Promise<string> {
     .get(txHash) as
       | { amount: string; tx_hash: string; from_address: string; author_id: string; timestamp: number; author_handle: string | null }
       | undefined;
+  if (!tip) {
+    tip = await db
+      .prepare(
+        `SELECT amount_raw as amount,
+                tx_hash,
+                sender_address as from_address,
+                recipient_x_user_id as author_id,
+                CAST(created_at / 1000 AS INTEGER) as timestamp,
+                recipient_x_username as author_handle
+         FROM x_bot_tips
+         WHERE LOWER(tx_hash) = LOWER(?)
+         ORDER BY created_at DESC
+         LIMIT 1`,
+      )
+      .get(txHash) as
+      | { amount: string; tx_hash: string; from_address: string; author_id: string; timestamp: number; author_handle: string | null }
+      | undefined;
+  }
 
   const fallbackTitle = "Teep receipt";
   if (!tip) {

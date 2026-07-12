@@ -15188,13 +15188,11 @@ a.creator-public-supporter-card:hover {
 .x-tip-link-page {
   min-height: 100vh;
   display: grid;
-  grid-template-rows: auto 1fr;
   justify-items: center;
-  gap: var(--space-6);
-  padding: 0 var(--space-4) clamp(40px, 8vw, 96px);
-  background:
-    radial-gradient(circle at 50% 8%, rgba(99, 36, 235, 0.18), transparent 34rem),
-    #000;
+  align-content: start;
+  gap: clamp(28px, 5vw, 56px);
+  padding: clamp(28px, 7vw, 88px) var(--space-4) clamp(48px, 8vw, 96px);
+  background: #000;
   color: var(--text-primary);
 }
 
@@ -15231,8 +15229,9 @@ a.creator-public-supporter-card:hover {
 }
 
 .x-tip-link-hero,
-.x-tip-link-card {
-  width: min(100%, 58rem);
+.x-tip-link-card,
+.x-tip-link-claim-shell {
+  width: min(100%, 76rem);
 }
 
 .x-tip-link-hero {
@@ -15245,6 +15244,36 @@ a.creator-public-supporter-card:hover {
 
 .x-tip-link-hero--claim {
   min-height: min(760px, calc(100vh - 110px));
+}
+
+.x-tip-link-claim-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(20rem, 0.95fr);
+  gap: clamp(28px, 5vw, 64px);
+  align-items: center;
+}
+
+.x-tip-link-claim-copy {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-5);
+}
+
+.x-tip-link-claim-copy h1 {
+  margin: 0;
+  max-width: 12ch;
+  color: var(--text-primary);
+  font-size: clamp(3rem, 8vw, 6.5rem);
+  line-height: 0.92;
+  letter-spacing: 0;
+}
+
+.x-tip-link-claim-copy p {
+  margin: 0;
+  max-width: 38rem;
+  color: var(--text-secondary);
+  font-size: clamp(1.05rem, 2.1vw, 1.35rem);
+  line-height: 1.55;
 }
 
 .x-tip-link-badge {
@@ -15287,6 +15316,16 @@ a.creator-public-supporter-card:hover {
   font-weight: 900;
 }
 
+.x-tip-link-avatar-img {
+  width: clamp(86px, 11vw, 128px);
+  height: clamp(86px, 11vw, 128px);
+  border-radius: var(--radius-full);
+  object-fit: cover;
+  background: rgba(31, 28, 43, 0.9);
+  border: 1px solid rgba(205, 189, 255, 0.3);
+  box-shadow: 0 18px 54px rgba(99, 36, 235, 0.18);
+}
+
 .x-tip-link-hero h1,
 .x-tip-link-card h1 {
   margin: 0;
@@ -15315,6 +15354,11 @@ a.creator-public-supporter-card:hover {
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.32);
 }
 
+.x-tip-link-card--message {
+  width: min(100%, 46rem);
+  align-self: center;
+}
+
 .x-tip-link-panel {
   width: min(100%, 42rem);
   display: grid;
@@ -15323,6 +15367,13 @@ a.creator-public-supporter-card:hover {
   border: 1px solid rgba(205, 189, 255, 0.12);
   border-radius: var(--radius-xl);
   background: rgba(31, 28, 43, 0.72);
+}
+
+.x-tip-link-panel--claim {
+  width: 100%;
+  background: var(--surface);
+  border-color: var(--border);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.42);
 }
 
 .x-tip-link-summary {
@@ -15356,6 +15407,13 @@ a.creator-public-supporter-card:hover {
   overflow-wrap: anywhere;
 }
 
+.x-tip-link-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
 .x-tip-link-primary {
   justify-self: center;
   min-width: min(100%, 18rem);
@@ -15372,7 +15430,7 @@ a.creator-public-supporter-card:hover {
 @media (max-width: 640px) {
   .x-tip-link-page {
     min-height: 100vh;
-    padding-bottom: var(--space-8);
+    padding: var(--space-6) var(--space-4) var(--space-8);
   }
 
   .x-tip-link-topbar {
@@ -15383,6 +15441,27 @@ a.creator-public-supporter-card:hover {
     min-height: auto;
     align-content: start;
     padding-top: var(--space-5);
+  }
+
+  .x-tip-link-claim-shell {
+    grid-template-columns: 1fr;
+    gap: var(--space-6);
+    align-items: start;
+  }
+
+  .x-tip-link-claim-copy {
+    justify-items: center;
+    text-align: center;
+    gap: var(--space-4);
+  }
+
+  .x-tip-link-claim-copy h1 {
+    max-width: 11ch;
+    font-size: clamp(3rem, 14vw, 4.9rem);
+  }
+
+  .x-tip-link-claim-copy p {
+    font-size: 1rem;
   }
 
   .x-tip-link-summary {

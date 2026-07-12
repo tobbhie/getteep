@@ -5,9 +5,10 @@ import { API_BASE, CHROME_STORE_URL, RECEIPT_BASE_URL, CHAIN_NAME, EXPLORER_TX_U
 import { avatarErrorFallback, xAvatarUrl } from "../lib/avatar";
 
 interface ReceiptData {
+  receiptId?: string | null;
   fromAddress: string | null;
   fromIdentity?: string;
-  toAddress: string;
+  toAddress: string | null;
   amount: string;
   displayAmount?: boolean;
   txHash: string;
@@ -445,7 +446,7 @@ export default function TxReceipt() {
   const showCreatorClaimPrompt = showCreatorClaimState && !isCreatorClaimed;
   const claimCtaPath =
     isDirectTip && (data.recipientHandle || data.authorHandle)
-      ? `/register?intent=x-tip&recipient=${encodeURIComponent(data.recipientHandle || data.authorHandle || "")}&amount=${encodeURIComponent(amountUsd)}`
+      ? `/register?intent=x-tip&recipient=${encodeURIComponent(data.recipientHandle || data.authorHandle || "")}&amount=${encodeURIComponent(amountUsd)}${data.receiptId ? `&receipt=${encodeURIComponent(data.receiptId)}` : ""}`
       : claimPath;
 
   return (

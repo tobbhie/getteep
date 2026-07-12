@@ -19,6 +19,27 @@ router.get("/", async (req: Request, res: Response) => {
        COUNT(DISTINCT from_address) as distinct_tippers
      FROM tips`
   ).get() as { total_tips: string; total_volume: string; distinct_tippers: string };
+  const xBotAgg = await db.prepare(
+    `SELECT
+       COUNT(*) as total_tips,
+       COALESCE(SUM(CAST(xbt.amount_raw AS NUMERIC)), 0) as total_volume
+     FROM x_bot_tips xbt
+     WHERE xbt.status = 'completed'
+       AND NOT EXISTS (
+         SELECT 1 FROM tips t
+         WHERE xbt.tx_hash IS NOT NULL AND LOWER(t.tx_hash) = LOWER(xbt.tx_hash)
+       )`
+  ).get() as { total_tips: string; total_volume: string };
+  const xBotTippers = await db.prepare(
+    `SELECT DISTINCT LOWER(sender_address) as address
+     FROM x_bot_tips xbt
+     WHERE xbt.status = 'completed'
+       AND NOT EXISTS (
+         SELECT 1 FROM tips t
+         WHERE xbt.tx_hash IS NOT NULL AND LOWER(t.tx_hash) = LOWER(xbt.tx_hash)
+       )`
+  ).all() as Array<{ address: string }>;
+  const indexedTippers = await db.prepare("SELECT DISTINCT LOWER(from_address) as address FROM tips").all() as Array<{ address: string }>;
 
   const creatorsCount = await db.prepare(
     "SELECT COUNT(DISTINCT author_id) as count FROM verified_claims"
@@ -26,9 +47,9 @@ router.get("/", async (req: Request, res: Response) => {
 
   res.set("Cache-Control", "public, max-age=60");
   res.json({
-    totalTips: Number(tipsAgg.total_tips),
-    totalVolumeUsd: (Number(tipsAgg.total_volume) / 1e6).toFixed(2),
-    distinctTippers: Number(tipsAgg.distinct_tippers),
+    totalTips: Number(tipsAgg.total_tips) + Number(xBotAgg.total_tips),
+    totalVolumeUsd: ((Number(tipsAgg.total_volume) + Number(xBotAgg.total_volume)) / 1e6).toFixed(2),
+    distinctTippers: new Set([...indexedTippers, ...xBotTippers].map((row) => row.address)).size,
     verifiedCreators: Number(creatorsCount.count),
   });
 });
@@ -59,8 +80,36 @@ router.get("/recent-tips", async (req: Request, res: Response) => {
       meta_handle: string | null;
       meta_tweet_id: string | null;
     }>;
+  const xBotRows = await db
+    .prepare(
+      `SELECT xbt.amount_raw as amount,
+              xbt.recipient_x_user_id as author_id,
+              xbt.sender_address as from_address,
+              CAST(xbt.created_at / 1000 AS INTEGER) as timestamp,
+              xbt.recipient_x_username as meta_handle,
+              xbt.source_tweet_id as meta_tweet_id
+       FROM x_bot_tips xbt
+       WHERE xbt.status = 'completed'
+         AND NOT EXISTS (
+           SELECT 1 FROM tips t
+           WHERE xbt.tx_hash IS NOT NULL AND LOWER(t.tx_hash) = LOWER(xbt.tx_hash)
+         )
+       ORDER BY xbt.created_at DESC
+       LIMIT ?`
+    )
+    .all(limit) as Array<{
+      amount: string;
+      author_id: string;
+      from_address: string;
+      timestamp: number;
+      meta_handle: string | null;
+      meta_tweet_id: string | null;
+    }>;
+  const mergedRows = [...rows, ...xBotRows]
+    .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0))
+    .slice(0, limit);
 
-  const authorIds = [...new Set(rows.map((r) => r.author_id))];
+  const authorIds = [...new Set(mergedRows.map((r) => r.author_id))];
   const claims =
     authorIds.length > 0
       ? (await db
@@ -72,9 +121,9 @@ router.get("/recent-tips", async (req: Request, res: Response) => {
           .all(...authorIds) as Array<{ author_id: string; username: string }>)
       : [];
   const byAuthor = Object.fromEntries(claims.map((c) => [c.author_id, c.username]));
-  const identities = await resolveAddressIdentities(rows.map((r) => r.from_address));
+  const identities = await resolveAddressIdentities(mergedRows.map((r) => r.from_address));
 
-  const recentTips = rows.map((r) => {
+  const recentTips = mergedRows.map((r) => {
     const postUrl =
       r.meta_handle && r.meta_tweet_id
         ? `https://x.com/${r.meta_handle}/status/${r.meta_tweet_id}`
@@ -82,7 +131,7 @@ router.get("/recent-tips", async (req: Request, res: Response) => {
     const senderIdentity = identities.get(r.from_address.toLowerCase());
     return {
       amountUsd: (Number(r.amount) / 1e6).toFixed(2),
-      creatorUsername: byAuthor[r.author_id] ?? null,
+      creatorUsername: byAuthor[r.author_id] ?? r.meta_handle ?? null,
       postAuthorHandle: r.meta_handle ?? null,
       fromAddress: r.from_address,
       fromIdentity: senderIdentity

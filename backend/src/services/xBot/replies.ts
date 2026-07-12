@@ -8,6 +8,7 @@ export type IntentReplyContext = {
   tweetId?: string;
   recipientHandle?: string;
   amount?: string;
+  receiptId?: string;
   intent?: "x-tip" | "x-balance";
 };
 
@@ -33,6 +34,7 @@ export function buildIntentUrl(context?: IntentReplyContext) {
     tweetId: context?.tweetId,
     recipient: context?.recipientHandle?.replace(/^@/, ""),
     amount: context?.amount,
+    receipt: context?.receiptId,
   });
 }
 
@@ -132,6 +134,7 @@ export function buildClaimableReply(params: {
     intent: "x-tip",
     recipientHandle: params.recipientHandle,
     amount,
+    receiptId: params.receiptId,
   });
   return [
     "Tip reserved",

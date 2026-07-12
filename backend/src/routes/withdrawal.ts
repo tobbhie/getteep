@@ -139,6 +139,23 @@ async function getDailyUsage(ownerAddress: string, db = getDb()) {
   return { used, remaining, limit: DAILY_LIMIT_RAW, windowStart: dayStart, windowEnd: dayEnd };
 }
 
+async function getTipActivityCount(ownerAddress: string, db = getDb()): Promise<number> {
+  const indexed = await db.prepare(
+    "SELECT COUNT(*) as c FROM tips WHERE LOWER(from_address) = ?"
+  ).get(ownerAddress.toLowerCase()) as { c: number | string } | undefined;
+  const xBot = await db.prepare(
+    `SELECT COUNT(*) as c
+     FROM x_bot_tips xbt
+     WHERE LOWER(xbt.sender_address) = ?
+       AND xbt.status = 'completed'
+       AND NOT EXISTS (
+         SELECT 1 FROM tips t
+         WHERE xbt.tx_hash IS NOT NULL AND LOWER(t.tx_hash) = LOWER(xbt.tx_hash)
+       )`
+  ).get(ownerAddress.toLowerCase()) as { c: number | string } | undefined;
+  return Number(indexed?.c ?? 0) + Number(xBot?.c ?? 0);
+}
+
 async function assertVerifiedCreator(ownerAddress: string, source: WithdrawalSource, res: Response): Promise<boolean> {
   if (source !== "tipsEarned") return true;
   const db = getDb();
@@ -225,10 +242,7 @@ router.get("/breakdown", async (req: Request, res: Response) => {
   const db = getDb();
 
   // Check if this user was referred and referral is active (e.g. has sent at least 1 tip)
-  const tipCount = await db.prepare(
-    "SELECT COUNT(*) as c FROM tips WHERE from_address = ?"
-  ).get(ownerAddress) as { c: number | string } | undefined;
-  const hasActiveReferral = Number(tipCount?.c ?? 0) >= REFERRAL_ACTIVATION_MIN_TIPS;
+  const hasActiveReferral = (await getTipActivityCount(ownerAddress, db)) >= REFERRAL_ACTIVATION_MIN_TIPS;
 
   if (hasActiveReferral && feeAmount > 0n) {
     const refRow = await db.prepare(
@@ -475,8 +489,7 @@ router.post("/record", async (req: Request, res: Response) => {
     let referrerAddress: string | null = null;
     let referrerAmount = 0n;
     const feeAmount = (BigInt(row.amount_raw) * BigInt(FEE_BPS)) / 10000n;
-    const activeTipCount = await db.prepare("SELECT COUNT(*) as c FROM tips WHERE from_address = ?").get(ownerAddress) as { c: number | string } | undefined;
-    const hasActiveReferral = Number(activeTipCount?.c ?? 0) >= REFERRAL_ACTIVATION_MIN_TIPS;
+    const hasActiveReferral = (await getTipActivityCount(ownerAddress, db)) >= REFERRAL_ACTIVATION_MIN_TIPS;
     if (hasActiveReferral && feeAmount > 0n) {
       const refRow = await db.prepare("SELECT referrer_address FROM user_referrals WHERE user_address = ?").get(ownerAddress) as { referrer_address: string } | undefined;
       const refAddr = refRow?.referrer_address?.toLowerCase();

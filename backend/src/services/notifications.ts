@@ -238,11 +238,50 @@ export async function createCreatorClaimedNotifications(params: {
   ownerAddress: string;
 }) {
   const tippers = await query<{ from_address: string; tipCount: string; total: string }>(
-    `SELECT from_address, COUNT(*) as "tipCount", COALESCE(SUM(CAST(amount AS NUMERIC)), 0) as total
-     FROM tips
-     WHERE author_id = ? AND LOWER(from_address) <> ?
+    `SELECT from_address, SUM(tip_count) as "tipCount", COALESCE(SUM(total), 0) as total
+     FROM (
+       SELECT LOWER(from_address) as from_address,
+              COUNT(*) as tip_count,
+              COALESCE(SUM(CAST(amount AS NUMERIC)), 0) as total
+       FROM tips
+       WHERE author_id = ? AND LOWER(from_address) <> ?
+       GROUP BY LOWER(from_address)
+
+       UNION ALL
+
+       SELECT LOWER(sender_address) as from_address,
+              COUNT(*) as tip_count,
+              COALESCE(SUM(CAST(amount_raw AS NUMERIC)), 0) as total
+       FROM claimable_tips
+       WHERE recipient_x_user_id = ?
+         AND status IN ('unclaimed', 'claimed')
+         AND LOWER(sender_address) <> ?
+       GROUP BY LOWER(sender_address)
+
+       UNION ALL
+
+       SELECT LOWER(xbt.sender_address) as from_address,
+              COUNT(*) as tip_count,
+              COALESCE(SUM(CAST(xbt.amount_raw AS NUMERIC)), 0) as total
+       FROM x_bot_tips xbt
+       WHERE xbt.recipient_x_user_id = ?
+         AND xbt.status = 'completed'
+         AND LOWER(xbt.sender_address) <> ?
+         AND NOT EXISTS (
+           SELECT 1 FROM tips t
+           WHERE xbt.tx_hash IS NOT NULL AND LOWER(t.tx_hash) = LOWER(xbt.tx_hash)
+         )
+       GROUP BY LOWER(xbt.sender_address)
+     ) support
      GROUP BY from_address`,
-    [params.authorId, params.ownerAddress.toLowerCase()]
+    [
+      params.authorId,
+      params.ownerAddress.toLowerCase(),
+      params.authorId,
+      params.ownerAddress.toLowerCase(),
+      params.authorId,
+      params.ownerAddress.toLowerCase(),
+    ]
   );
 
   for (const tipper of tippers) {

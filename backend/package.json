@@ -8,7 +8,10 @@
     "build": "npm run clean && tsc",
     "start": "node dist/index.js",
     "db:migrate": "ts-node src/db/migrate.ts",
-    "db:migrate:prod": "node dist/db/migrate.js"
+    "db:migrate:prod": "node dist/db/migrate.js",
+    "ops:repair-claim-wallets": "ts-node src/scripts/repairComputedClaimWalletRows.ts",
+    "ops:claim-wallet": "ts-node src/scripts/claimWalletConsistency.ts",
+    "ops:reconcile-x-bot": "ts-node src/scripts/reconcileXBotTips.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

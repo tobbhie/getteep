@@ -104,10 +104,16 @@ export async function getAccountActivity(options: {
     [address, limit],
   );
 
-  const claim = await one<{ username: string; author_id: string }>(
+  let claim = await one<{ username: string; author_id: string }>(
     "SELECT username, author_id FROM verified_claims WHERE owner_address = ? ORDER BY verified_at DESC LIMIT 1",
     [address]
   );
+  if (!claim) {
+    claim = await one<{ username: string; author_id: string }>(
+      "SELECT x_username as username, x_user_id as author_id FROM x_accounts WHERE user_address = ? ORDER BY verified_at DESC LIMIT 1",
+      [address]
+    );
+  }
 
   let tipsReceived: AccountActivityRecord[] = [];
   let xBotTipsReceived: AccountActivityRecord[] = [];

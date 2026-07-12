@@ -111,7 +111,7 @@ function xPostUrl(authorHandle: string | null, tweetId: string | null) {
 }
 
 function isDirectTip(row: TipRow) {
-  return row.kind === "direct_creator_tip" || !row.tweet_id;
+  return row.kind === "direct_creator_tip" || row.kind === "x_bot_tip" || !row.tweet_id;
 }
 
 function previousWindow(startAt: number | null, endAt: number, days: number | null) {
@@ -182,7 +182,7 @@ export async function getCreatorPerformance(
   const previous = previousWindow(startAt, endAt, days);
   const db = getDb();
 
-  const claim = await db
+  let claim = await db
     .prepare(
       `SELECT author_id, username, display_name, profile_image_url
        FROM verified_claims
@@ -191,10 +191,29 @@ export async function getCreatorPerformance(
        LIMIT 1`
     )
     .get(identifier.authorId, identifier.username) as CreatorClaim | undefined;
+  if (!claim) {
+    const linked = await db
+      .prepare(
+        `SELECT x_user_id as author_id, x_username as username
+         FROM x_accounts
+         WHERE x_user_id = ? OR LOWER(x_username) = ?
+         ORDER BY verified_at DESC
+         LIMIT 1`
+      )
+      .get(identifier.authorId, identifier.username) as { author_id: string; username: string } | undefined;
+    if (linked) {
+      claim = {
+        author_id: linked.author_id,
+        username: linked.username,
+        display_name: null,
+        profile_image_url: null,
+      };
+    }
+  }
 
   if (!claim) return null;
 
-  const allRows = await db
+  const indexedRows = await db
     .prepare(
       `SELECT t.content_id, t.author_id, t.from_address, t.to_address, t.amount, t.tx_hash,
               t.block_number, t.log_index, t.timestamp,
@@ -202,9 +221,42 @@ export async function getCreatorPerformance(
        FROM tips t
        LEFT JOIN tip_metadata m ON t.content_id = m.content_id
        WHERE (t.author_id = ? OR LOWER(COALESCE(m.author_handle, '')) = LOWER(?))
-       ORDER BY t.timestamp DESC, t.block_number DESC, t.log_index DESC`
+      ORDER BY t.timestamp DESC, t.block_number DESC, t.log_index DESC`
     )
     .all(claim.author_id, claim.username) as TipRow[];
+
+  const xBotRows = await db
+    .prepare(
+      `SELECT
+          xbt.source_tweet_id as content_id,
+          xbt.recipient_x_user_id as author_id,
+          xbt.sender_address as from_address,
+          xbt.recipient_address as to_address,
+          xbt.amount_raw as amount,
+          xbt.tx_hash,
+          0 as block_number,
+          0 as log_index,
+          CAST(xbt.created_at / 1000 AS INTEGER) as timestamp,
+          xbt.recipient_x_username as author_handle,
+          xbt.source_tweet_id as tweet_id,
+          'x_bot_tip' as kind
+       FROM x_bot_tips xbt
+       WHERE xbt.status = 'completed'
+         AND (xbt.recipient_x_user_id = ? OR LOWER(COALESCE(xbt.recipient_x_username, '')) = LOWER(?))
+         AND NOT EXISTS (
+           SELECT 1 FROM tips t
+           WHERE xbt.tx_hash IS NOT NULL AND LOWER(t.tx_hash) = LOWER(xbt.tx_hash)
+         )
+       ORDER BY xbt.created_at DESC`
+    )
+    .all(claim.author_id, claim.username) as TipRow[];
+
+  const allRows = [...indexedRows, ...xBotRows]
+    .sort((a, b) => {
+      if (b.timestamp !== a.timestamp) return b.timestamp - a.timestamp;
+      if (b.block_number !== a.block_number) return b.block_number - a.block_number;
+      return b.log_index - a.log_index;
+    });
 
   const currentRows = filterRows(allRows, startAt, endAt);
   const previousRows = previous ? filterRows(allRows, previous.startAt, previous.endAt) : [];
@@ -485,7 +537,7 @@ export async function getCreatorPerformance(
     decisions,
     daily: dailySeries,
     provenance: {
-      sourceTables: ["tips", "tip_metadata", "verified_claims", "user_settings"],
+      sourceTables: ["tips", "x_bot_tips", "tip_metadata", "verified_claims", "user_settings"],
       computedFromRows: currentRows.length,
       allCreatorRows: allRows.length,
       notes: [
