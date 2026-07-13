@@ -488,14 +488,6 @@
   padding-inline: 20px;
 }
 
-.lp-hero-extension-note {
-  display: none;
-  margin: 12px 0 0;
-  color: rgba(255, 255, 255, 0.62);
-  font-size: 0.875rem;
-  line-height: 1.45;
-}
-
 .lp-product-stage {
   position: relative;
   width: min(100%, 1060px);
@@ -2450,11 +2442,6 @@
   .lp-hero-actions {
     margin-top: 24px;
     justify-content: center;
-  }
-
-  .lp-hero-extension-cta,
-  .lp-hero-extension-note {
-    display: none;
   }
 
   .lp-section > .lp-container > .lp-kicker,

@@ -1,4 +1,7 @@
+export type XTipTargetType = "post" | "creator";
+
 export type TipIntent = {
+  targetType: XTipTargetType;
   recipientXHandle?: string;
   amount: string;
   tokenSymbol: "USDC";
@@ -19,10 +22,14 @@ export type XIncomingPost = {
   text: string;
   authorId: string;
   authorUsername?: string;
+  authorName?: string;
+  authorProfileImageUrl?: string;
   conversationId?: string;
   parentTweetId?: string;
   parentAuthorId?: string;
   parentAuthorUsername?: string;
+  parentAuthorName?: string;
+  parentAuthorProfileImageUrl?: string;
 };
 
 export type ProcessPostResult = {

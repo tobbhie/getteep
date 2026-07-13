@@ -10,7 +10,7 @@ interface RechargePromptProps {
   onRetry: () => void;
   amountUsd: string;
   handle: string;
-  /** When true (e.g. hero tipping flow), show Add funds in-modal with options dropdown (same as extension) */
+  /** When true (e.g. hero tipping flow), show Add funds in-modal with options dropdown */
   embedFunding?: boolean;
   /** Wallet address for onramp/faucet/deposit; when missing, options still shown but link to dashboard */
   walletAddress?: string | null;
@@ -86,9 +86,7 @@ export default function RechargePrompt({
 
   if (!open) return null;
 
-  const onrampUrl = walletAddress && fundingPolicy.providers.fiatOnramp.enabled && fundingPolicy.providers.fiatOnramp.url
-    ? fundingPolicy.providers.fiatOnramp.url.replace("WALLET", walletAddress)
-    : null;
+  const fundLink = `/fund?intent=x-tip&recipient=${encodeURIComponent(handle)}&amount=${encodeURIComponent(amountUsd)}`;
 
   return (
     <div
@@ -122,10 +120,10 @@ export default function RechargePrompt({
               </button>
               {fundingDropdownOpen && (
                 <div className="recharge-funding-menu" role="menu">
-                  {onrampUrl ? (
-                    <a href={onrampUrl} target="_blank" rel="noopener noreferrer" className="recharge-funding-item" role="menuitem">
+                  {fundingPolicy.providers.fiatOnramp.enabled ? (
+                    <Link to={fundLink} className="recharge-funding-item" role="menuitem" onClick={onClose}>
                       {fundingPolicy.providers.fiatOnramp.label}
-                    </a>
+                    </Link>
                   ) : (
                     <button type="button" className="recharge-funding-item recharge-funding-item--btn" role="menuitem" disabled title={fundingPolicy.providers.fiatOnramp.disabledReason}>
                       {fundingPolicy.providers.fiatOnramp.label} - unavailable

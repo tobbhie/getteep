@@ -40,7 +40,7 @@ export function DashboardConnectCard({
           Connect
         </button>
         <p style={{ fontSize: "var(--text-small)", color: "var(--text-muted)", marginBottom: "var(--space-2)" }}>
-          New here? You can tip, claim, withdraw, and manage your Teep balance from the web app. The extension is optional.
+          New here? You can tip, claim, withdraw, and manage your Teep balance from the web app.
         </p>
         <Link to="/" style={{ fontSize: "var(--text-small)", fontWeight: 600, color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 6 }}>
           <span className="material-symbols-outlined" style={{ fontSize: 18 }}>

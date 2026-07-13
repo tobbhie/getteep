@@ -68,6 +68,7 @@ export default function DashboardWithdraw() {
   const [tipBalance, setTipBalance] = useState<string>("0");
   const [tipsEarnedBalance, setTipsEarnedBalance] = useState<string>("0");
   const [withdrawalSource, setWithdrawalSource] = useState<"tipBalance" | "tipsEarned">("tipBalance");
+  const [withdrawalMethod, setWithdrawalMethod] = useState<"wallet" | "bank">("wallet");
   const [withdrawTo, setWithdrawTo] = useState("");
   const [withdrawAmount, setWithdrawAmount] = useState("");
   const [loading, setLoading] = useState(true);
@@ -95,10 +96,25 @@ export default function DashboardWithdraw() {
 
   const selectWithdrawalSource = useCallback((source: "tipBalance" | "tipsEarned") => {
     setWithdrawalSource(source);
+    if (source === "tipBalance") setWithdrawalMethod("wallet");
     setWithdrawAmount("");
     setBreakdown(null);
     setMsg(null);
   }, []);
+
+  const selectWithdrawalMethod = useCallback((method: "wallet" | "bank") => {
+    if (method === "bank") {
+      if (!fundingPolicy.providers.fiatOfframp.enabled) {
+        setMsg({ text: fundingPolicy.providers.fiatOfframp.disabledReason || "Bank cash-out is not available yet.", ok: false });
+        return;
+      }
+      setWithdrawalSource("tipsEarned");
+      setWithdrawTo("");
+    }
+    setWithdrawalMethod(method);
+    setBreakdown(null);
+    setMsg(null);
+  }, [fundingPolicy.providers.fiatOfframp.disabledReason, fundingPolicy.providers.fiatOfframp.enabled]);
 
   useEffect(() => {
     const requestedSource = new URLSearchParams(search).get("source");
@@ -277,13 +293,22 @@ export default function DashboardWithdraw() {
   }, [address, withdrawalSource, activeBalanceUsd, withdrawAmount]);
 
   const handleWithdraw = async () => {
-    if (!withdrawTo?.trim() || !withdrawAmount?.trim()) {
-      setMsg({ text: "Enter amount and destination", ok: false });
+    const isBankWithdrawal = withdrawalMethod === "bank";
+    if ((!isBankWithdrawal && !withdrawTo?.trim()) || !withdrawAmount?.trim()) {
+      setMsg({ text: isBankWithdrawal ? "Enter amount" : "Enter amount and destination", ok: false });
       return;
     }
-    if (!/^0x[a-fA-F0-9]{40}$/.test(withdrawTo.trim())) {
-      setMsg({ text: "Enter a valid destination address", ok: false });
+    if (isBankWithdrawal && withdrawalSource !== "tipsEarned") {
+      setMsg({ text: "Bank cash-out is available only for Tips Earned withdrawals.", ok: false });
       return;
+    }
+    let dest: `0x${string}` | null = null;
+    if (!isBankWithdrawal) {
+      if (!/^0x[a-fA-F0-9]{40}$/.test(withdrawTo.trim())) {
+        setMsg({ text: "Enter a valid destination address", ok: false });
+        return;
+      }
+      dest = withdrawTo.trim() as `0x${string}`;
     }
     const amountNum = parseFloat(withdrawAmount);
     if (isNaN(amountNum) || amountNum <= 0) {
@@ -297,7 +322,6 @@ export default function DashboardWithdraw() {
       setMsg({ text: "Enter a valid USDC amount", ok: false });
       return;
     }
-    const dest = withdrawTo.trim() as `0x${string}`;
     if (rawAmount > BigInt(activeBalance || "0")) {
       setMsg({
         text: withdrawalSource === "tipsEarned"
@@ -311,6 +335,10 @@ export default function DashboardWithdraw() {
     if (withdrawalSource === "tipBalance") {
       if (!address || !smartWalletClient) {
         setMsg({ text: "Connect your wallet to withdraw", ok: false });
+        return;
+      }
+      if (!dest) {
+        setMsg({ text: "Enter a valid destination address", ok: false });
         return;
       }
     setSubmitting(true);
@@ -363,7 +391,7 @@ export default function DashboardWithdraw() {
         chain: arcTestnet,
         account: smartWalletClient.account,
       } as any);
-      await fetch(`${API_BASE}/withdrawal/record`, {
+      const recordRes = await fetch(`${API_BASE}/withdrawal/record`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -373,6 +401,14 @@ export default function DashboardWithdraw() {
           recordToken: confirmData.recordToken,
         }),
       }).catch(() => null);
+      if (!recordRes?.ok) {
+        setMsg({
+          text: `Withdrawal transaction was sent (${txHash.slice(0, 10)}...), but Teep could not record it. Contact support before retrying.`,
+          ok: false,
+        });
+        setSubmitting(false);
+        return;
+      }
       setMsg({ text: "Withdrawal successful!", ok: true });
         setWithdrawTo("");
         setWithdrawAmount("");
@@ -407,29 +443,65 @@ export default function DashboardWithdraw() {
       }
 
       const useWithdrawWithFee = !!REFERRAL_REGISTRY_ADDRESS;
-      const confirmationProof = await createWalletProof("withdrawal");
-      const confirmationRes = await fetch(`${API_BASE}/withdrawal/request`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ownerAddress: address,
-          destinationAddress: dest,
-          source: "tipsEarned",
-          amountRaw: rawAmount.toString(),
-          email: user?.email?.address,
-          walletProof: confirmationProof,
-        }),
-      });
-      const confirmation = await readApiPayload(confirmationRes);
-      if (!confirmationRes.ok || !confirmation.requestId) {
-        setMsg({ text: confirmation.error || "Could not prepare withdrawal confirmation", ok: false });
-        setSubmitting(false);
-        return;
+      let confirmation: Record<string, any>;
+      let crossmintSessionId: string | null = null;
+      let executionDestination = dest;
+      if (isBankWithdrawal) {
+        const crossmintProof = await createWalletProof("withdrawal");
+        const crossmintRes = await fetch(`${API_BASE}/crossmint/offramp/orders`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ownerAddress: address,
+            claimWalletAddress: selectedClaimWalletAddress,
+            source: "tipsEarned",
+            amountRaw: rawAmount.toString(),
+            email: user?.email?.address,
+            walletProof: crossmintProof,
+          }),
+        });
+        const crossmintOrder = await readApiPayload(crossmintRes);
+        if (!crossmintRes.ok || !crossmintOrder.requestId || !crossmintOrder.depositAddress) {
+          setMsg({ text: crossmintOrder.error || "Could not prepare Crossmint bank cash-out", ok: false });
+          setSubmitting(false);
+          return;
+        }
+        executionDestination = String(crossmintOrder.depositAddress).toLowerCase() as `0x${string}`;
+        crossmintSessionId = String(crossmintOrder.sessionId || "");
+        confirmation = {
+          requestId: crossmintOrder.requestId,
+          devCode: crossmintOrder.devCode,
+        };
+      } else {
+        if (!executionDestination) {
+          setMsg({ text: "Enter a valid destination address", ok: false });
+          setSubmitting(false);
+          return;
+        }
+        const confirmationProof = await createWalletProof("withdrawal");
+        const confirmationRes = await fetch(`${API_BASE}/withdrawal/request`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ownerAddress: address,
+            destinationAddress: executionDestination,
+            source: "tipsEarned",
+            amountRaw: rawAmount.toString(),
+            email: user?.email?.address,
+            walletProof: confirmationProof,
+          }),
+        });
+        confirmation = await readApiPayload(confirmationRes);
+        if (!confirmationRes.ok || !confirmation.requestId) {
+          setMsg({ text: confirmation.error || "Could not prepare withdrawal confirmation", ok: false });
+          setSubmitting(false);
+          return;
+        }
       }
       const confirmationCode = await requestConfirmationCode(
         { requestId: String(confirmation.requestId), devCode: confirmation.devCode },
         rawAmount,
-        dest
+        executionDestination as `0x${string}`
       );
       if (!confirmationCode) {
         setMsg({ text: "Withdrawal confirmation cancelled", ok: false });
@@ -461,12 +533,12 @@ export default function DashboardWithdraw() {
       if (useWithdrawWithFee) {
         const auth = confirmData.withdrawalAuthorization;
         const data = auth
-          ? encodeWithdrawWithAuthorizationCall(dest, rawAmount, {
+          ? encodeWithdrawWithAuthorizationCall(executionDestination as `0x${string}`, rawAmount, {
               expiresAt: auth.expiresAt,
               nonce: auth.nonce,
               signature: auth.signature,
             })
-          : encodeWithdrawWithFeeCall(dest, rawAmount);
+          : encodeWithdrawWithFeeCall(executionDestination as `0x${string}`, rawAmount);
         txHash = await smartWalletClient!.sendTransaction({
           calls: [{ to: withdrawalClaimAddr as `0x${string}`, data }],
           chain: arcTestnet,
@@ -481,7 +553,7 @@ export default function DashboardWithdraw() {
 
         const calls: Array<{ to: `0x${string}`; data: `0x${string}` }> = [];
         if (netAmount > 0n) {
-          calls.push({ to: withdrawalClaimAddr as `0x${string}`, data: encodeWithdrawCall(dest, netAmount) });
+          calls.push({ to: withdrawalClaimAddr as `0x${string}`, data: encodeWithdrawCall(executionDestination as `0x${string}`, netAmount) });
         }
         if (protocolAmount > 0n && protocolTreasury && protocolTreasury !== "0x0000000000000000000000000000000000000000") {
           calls.push({ to: withdrawalClaimAddr as `0x${string}`, data: encodeWithdrawCall(protocolTreasury as `0x${string}`, protocolAmount) });
@@ -511,7 +583,19 @@ export default function DashboardWithdraw() {
           recordToken: confirmData.recordToken,
         }),
       }).catch(() => null);
-      setMsg({ text: "Withdrawal successful!", ok: true });
+      if (crossmintSessionId) {
+        await fetch(`${API_BASE}/crossmint/offramp/sessions/${encodeURIComponent(crossmintSessionId)}/deposit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            requestId: confirmation.requestId,
+            ownerAddress: address,
+            txHash,
+            recordToken: confirmData.recordToken,
+          }),
+        }).catch(() => null);
+      }
+      setMsg({ text: isBankWithdrawal ? "Bank cash-out deposit sent. Crossmint will finish the payout after provider checks." : "Withdrawal successful!", ok: true });
       setWithdrawTo("");
       setWithdrawAmount("");
       setBreakdown(null);
@@ -521,11 +605,13 @@ export default function DashboardWithdraw() {
         body: JSON.stringify({
           type: "withdraw",
           fromAddress: address,
-          toAddress: withdrawTo,
+          toAddress: executionDestination,
           amount: rawAmount.toString(),
           txHash,
-          detail: `Cash out to ${withdrawTo.slice(0, 6)}...${withdrawTo.slice(-4)}`,
-          sourceMethod: "web_dashboard",
+          detail: isBankWithdrawal
+            ? "Crossmint bank cash-out"
+            : `Cash out to ${executionDestination!.slice(0, 6)}...${executionDestination!.slice(-4)}`,
+          sourceMethod: isBankWithdrawal ? "crossmint_web_dashboard" : "web_dashboard",
         }),
       }).catch(() => {});
       if (!useWithdrawWithFee && breakdownData.referrerAddress && breakdownData.referrerAmount && breakdownData.referrerAddress !== "0x0000000000000000000000000000000000000000") {
@@ -595,43 +681,52 @@ export default function DashboardWithdraw() {
 
             {/* Pills: Wallet Transfer | Offramp */}
             <div style={{ display: "flex", gap: 4, padding: 4, background: "var(--bg-elevated)", borderRadius: "var(--radius-md)", maxWidth: 400, marginBottom: "var(--space-6)" }}>
-              <button type="button" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "10px 12px", background: "var(--bg-card)", color: primary, border: "none", borderRadius: "var(--radius-sm)", fontSize: "var(--text-small)", fontWeight: 700, boxShadow: "0 1px 2px rgba(0,0,0,0.2)" }}>
+              <button type="button" onClick={() => selectWithdrawalMethod("wallet")} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "10px 12px", background: withdrawalMethod === "wallet" ? "var(--bg-card)" : "transparent", color: withdrawalMethod === "wallet" ? primary : "var(--text-muted)", border: "none", borderRadius: "var(--radius-sm)", fontSize: "var(--text-small)", fontWeight: 700, boxShadow: withdrawalMethod === "wallet" ? "0 1px 2px rgba(0,0,0,0.2)" : "none", cursor: "pointer" }}>
                 <span className="material-symbols-outlined" style={{ fontSize: 20 }}>account_balance_wallet</span>
                 Wallet Transfer
               </button>
-              <button type="button" disabled={!fundingPolicy.providers.fiatOfframp.enabled} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "10px 12px", background: "transparent", color: "var(--text-muted)", border: "none", borderRadius: "var(--radius-sm)", fontSize: "var(--text-small)", fontWeight: 700, cursor: fundingPolicy.providers.fiatOfframp.enabled ? "pointer" : "not-allowed", opacity: fundingPolicy.providers.fiatOfframp.enabled ? 1 : 0.8 }}>
+              <button type="button" disabled={!fundingPolicy.providers.fiatOfframp.enabled || !canUseTipsEarned} onClick={() => selectWithdrawalMethod("bank")} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "10px 12px", background: withdrawalMethod === "bank" ? "var(--bg-card)" : "transparent", color: withdrawalMethod === "bank" ? primary : "var(--text-muted)", border: "none", borderRadius: "var(--radius-sm)", fontSize: "var(--text-small)", fontWeight: 700, cursor: fundingPolicy.providers.fiatOfframp.enabled && canUseTipsEarned ? "pointer" : "not-allowed", opacity: fundingPolicy.providers.fiatOfframp.enabled && canUseTipsEarned ? 1 : 0.8, boxShadow: withdrawalMethod === "bank" ? "0 1px 2px rgba(0,0,0,0.2)" : "none" }}>
                 <span className="material-symbols-outlined" style={{ fontSize: 20 }}>account_balance</span>
                 {fundingPolicy.providers.fiatOfframp.label}
-                {!fundingPolicy.providers.fiatOfframp.enabled && <span style={{ background: "var(--text-muted)", color: "#fff", fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, marginLeft: 4, textTransform: "uppercase" }}>Soon</span>}
+                {(!fundingPolicy.providers.fiatOfframp.enabled || !canUseTipsEarned) && <span style={{ background: "var(--text-muted)", color: "#fff", fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, marginLeft: 4, textTransform: "uppercase" }}>{fundingPolicy.providers.fiatOfframp.enabled ? "Verify" : "Soon"}</span>}
               </button>
             </div>
 
             {/* Form card — match code.html */}
             <div className="withdraw-form-card" style={{ borderRadius: "var(--radius-md)", background: "var(--bg-card)", padding: "var(--space-8)", border: "1px solid var(--border)" }}>
-              <div style={{ marginBottom: "var(--space-6)" }}>
-                <label style={{ display: "block", fontSize: "var(--text-small)", fontWeight: 700, color: "var(--text-secondary)", marginBottom: 4 }}>Destination Address</label>
-                <span style={{ display: "block", fontSize: 10, color: primary, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>Wallet Transfer Active</span>
-                <input
-                  type="text"
-                  placeholder="0x..."
-                  value={withdrawTo}
-                  onChange={(e) => setWithdrawTo(e.target.value)}
-                  style={{
-                    width: "100%",
-                    padding: "12px",
-                    background: "var(--bg-page)",
-                    border: "1px solid var(--border)",
-                    borderRadius: "var(--radius-sm)",
-                    color: "var(--text-primary)",
-                    fontSize: "var(--text-body)",
-                    fontFamily: "var(--font-mono)",
-                  }}
-                />
-                <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8, display: "flex", alignItems: "center", gap: 4 }}>
-                  <span className="material-symbols-outlined" style={{ fontSize: 14 }}>info</span>
-                  Make sure this destination is correct before continuing.
-                </p>
-              </div>
+              {withdrawalMethod === "wallet" ? (
+                <div style={{ marginBottom: "var(--space-6)" }}>
+                  <label style={{ display: "block", fontSize: "var(--text-small)", fontWeight: 700, color: "var(--text-secondary)", marginBottom: 4 }}>Destination Address</label>
+                  <span style={{ display: "block", fontSize: 10, color: primary, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>Wallet Transfer Active</span>
+                  <input
+                    type="text"
+                    placeholder="0x..."
+                    value={withdrawTo}
+                    onChange={(e) => setWithdrawTo(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "12px",
+                      background: "var(--bg-page)",
+                      border: "1px solid var(--border)",
+                      borderRadius: "var(--radius-sm)",
+                      color: "var(--text-primary)",
+                      fontSize: "var(--text-body)",
+                      fontFamily: "var(--font-mono)",
+                    }}
+                  />
+                  <p style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 8, display: "flex", alignItems: "center", gap: 4 }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: 14 }}>info</span>
+                    Make sure this destination is correct before continuing.
+                  </p>
+                </div>
+              ) : (
+                <div style={{ marginBottom: "var(--space-6)", padding: "var(--space-4)", borderRadius: "var(--radius-md)", background: "rgba(99,36,235,0.10)", border: "1px solid rgba(167,139,250,0.22)" }}>
+                  <strong style={{ display: "block", color: "var(--text-primary)", marginBottom: 6 }}>Crossmint staging bank cash-out</strong>
+                  <p style={{ color: "var(--text-secondary)", fontSize: "var(--text-small)", lineHeight: 1.5, margin: 0 }}>
+                    Teep creates a Crossmint staging order for the net amount, then you confirm a Tips Earned withdrawal that still applies the 5% fee.
+                  </p>
+                </div>
+              )}
 
               <div style={{ marginBottom: "var(--space-6)" }}>
                 <label style={{ display: "block", fontSize: "var(--text-small)", fontWeight: 700, color: "var(--text-secondary)", marginBottom: 10 }}>Withdrawal Source</label>
@@ -726,7 +821,7 @@ export default function DashboardWithdraw() {
                   </div>
                 )}
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: "var(--text-heading)", fontWeight: 800, paddingTop: "var(--space-3)", borderTop: "1px dashed var(--border)", marginTop: "var(--space-3)" }}>
-                  <span style={{ color: "var(--text-primary)" }}>Total to Wallet</span>
+                  <span style={{ color: "var(--text-primary)" }}>{withdrawalMethod === "bank" ? "Total to Bank" : "Total to Wallet"}</span>
                   <span style={{ color: success }}>
                     {withdrawalSource === "tipBalance"
                       ? (withdrawAmount.trim() && !isNaN(parseFloat(withdrawAmount)) ? `$${parseFloat(withdrawAmount).toFixed(2)}` : "—")
@@ -739,6 +834,10 @@ export default function DashboardWithdraw() {
                 <div style={{ display: "flex", justifyContent: "space-between", gap: "var(--space-3)", fontSize: "var(--text-small)" }}>
                   <span style={{ color: "var(--text-muted)" }}>Withdrawal source</span>
                   <strong style={{ color: "var(--text-primary)" }}>{withdrawalSource === "tipsEarned" ? "Tips Earned account" : "Tip Balance account"}</strong>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: "var(--space-3)", fontSize: "var(--text-small)" }}>
+                  <span style={{ color: "var(--text-muted)" }}>Method</span>
+                  <strong style={{ color: "var(--text-primary)" }}>{withdrawalMethod === "bank" ? "Crossmint bank cash-out" : "Wallet transfer"}</strong>
                 </div>
                 {withdrawalSource === "tipsEarned" && (
                   <>
@@ -766,7 +865,7 @@ export default function DashboardWithdraw() {
               <button
                 type="button"
                 onClick={handleWithdraw}
-                disabled={submitting || !withdrawTo.trim() || !withdrawAmount.trim() || parsedWithdrawAmount === null || amountExceedsActiveBalance || (withdrawalSource === "tipsEarned" && !canUseTipsEarned)}
+                disabled={submitting || (withdrawalMethod === "wallet" && !withdrawTo.trim()) || !withdrawAmount.trim() || parsedWithdrawAmount === null || amountExceedsActiveBalance || (withdrawalSource === "tipsEarned" && !canUseTipsEarned)}
                 style={{
                   width: "100%",
                   marginTop: "var(--space-6)",
@@ -777,8 +876,8 @@ export default function DashboardWithdraw() {
                   borderRadius: "var(--radius-md)",
                   fontSize: "var(--text-heading)",
                   fontWeight: 700,
-                  cursor: submitting || !withdrawTo.trim() || !withdrawAmount.trim() || parsedWithdrawAmount === null || amountExceedsActiveBalance ? "not-allowed" : "pointer",
-                  opacity: submitting || !withdrawTo.trim() || !withdrawAmount.trim() || parsedWithdrawAmount === null || amountExceedsActiveBalance ? 0.6 : 1,
+                  cursor: submitting || (withdrawalMethod === "wallet" && !withdrawTo.trim()) || !withdrawAmount.trim() || parsedWithdrawAmount === null || amountExceedsActiveBalance ? "not-allowed" : "pointer",
+                  opacity: submitting || (withdrawalMethod === "wallet" && !withdrawTo.trim()) || !withdrawAmount.trim() || parsedWithdrawAmount === null || amountExceedsActiveBalance ? 0.6 : 1,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -786,7 +885,7 @@ export default function DashboardWithdraw() {
                 }}
               >
                 <span className="material-symbols-outlined" style={{ fontSize: 22 }}>send_money</span>
-                {submitting ? "Processing…" : "Confirm Withdrawal"}
+                {submitting ? "Processing..." : withdrawalMethod === "bank" ? "Confirm Bank Cash-out" : "Confirm Withdrawal"}
               </button>
 
               {amountExceedsActiveBalance && (
@@ -803,11 +902,7 @@ export default function DashboardWithdraw() {
             </div>
 
             <p style={{ fontSize: "var(--text-caption)", color: "var(--text-muted)", marginTop: "var(--space-4)" }}>
-              Prefer bank? {fundingPolicy.providers.fiatOfframp.enabled && fundingPolicy.providers.fiatOfframp.url ? (
-                <a href={fundingPolicy.providers.fiatOfframp.url} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)" }}>Open cash-out provider</a>
-              ) : (
-                <span>{fundingPolicy.providers.fiatOfframp.disabledReason}</span>
-              )}
+              Bank cash-out runs through Teep's backend-created Crossmint staging order so earned-tip fees, confirmations, and records stay in one flow.
             </p>
           </div>
 
@@ -834,13 +929,15 @@ export default function DashboardWithdraw() {
                     icon: "payments",
                     title: withdrawalSource === "tipsEarned" ? "Fee is deducted before arrival" : "No Teep withdrawal fee",
                     body: withdrawalSource === "tipsEarned"
-                      ? `Estimated amount to wallet: ${breakdown ? `$${breakdown.netUsd}` : "enter an amount to preview"}.`
+                      ? `Estimated amount to ${withdrawalMethod === "bank" ? "bank" : "wallet"}: ${breakdown ? `$${breakdown.netUsd}` : "enter an amount to preview"}.`
                       : "The amount you enter is the amount sent to the destination wallet.",
                   },
                   {
-                    icon: "travel_explore",
-                    title: "Use a compatible destination",
-                    body: "Double-check the destination. Teep cannot recover money sent to the wrong place.",
+                    icon: withdrawalMethod === "bank" ? "verified_user" : "travel_explore",
+                    title: withdrawalMethod === "bank" ? "Provider checks still apply" : "Use a compatible destination",
+                    body: withdrawalMethod === "bank"
+                      ? "Crossmint may require KYC, bank, or payout checks before releasing funds."
+                      : "Double-check the destination. Teep cannot recover money sent to the wrong place.",
                   },
                 ].map((item) => (
                   <div key={item.title} style={{ display: "grid", gridTemplateColumns: "32px minmax(0, 1fr)", gap: "var(--space-3)", alignItems: "start", padding: "var(--space-3)", borderRadius: "var(--radius-md)", background: "rgba(45,40,57,0.72)", border: "1px solid rgba(255,255,255,0.1)" }}>

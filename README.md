@@ -6,7 +6,7 @@ Teep is currently configured for Arc testnet while the product is prepared for b
 
 ## What Teep Does
 
-- Lets fans send tips from supported creator posts through the Teep browser extension.
+- Lets fans send tips from creator pages, direct post links, and connected X tip commands.
 - Lets creators receive support before they have manually claimed a Teep account.
 - Gives creators a simple dashboard to claim, withdraw, and track tips.
 - Keeps the core flow non-custodial: Teep coordinates the experience, but users keep control of funds.
@@ -27,7 +27,8 @@ The dapp is built around three product principles:
 | Surface | Purpose |
 | --- | --- |
 | Web app | Landing page, dashboard, creator/tipper profiles, receipts, withdrawal flows |
-| Chrome extension | Post detection, native tip button injection, popup signing flow |
+| X agent | X tip command parsing and reply/claim flow |
+| Legacy extension | Retained workspace for browser-extension experiments; not a primary product surface |
 | Backend API | Auth, X OAuth, creator lookup, attestations, referrals, activity, ops, indexer |
 | Smart contracts | Tip escrow, deterministic claim wallets, referral accounting, growth strategy contracts |
 | Shared package | Cross-app helpers and types |
@@ -38,7 +39,7 @@ The dapp is built around three product principles:
 teep/
   backend/       Express API, SQLite, indexer, auth, ops, and creator routes
   contracts/     Solidity contracts, Hardhat config, deployment scripts, tests
-  extension/     Chrome MV3 extension for supported social post tipping
+  extension/     Legacy Chrome MV3 extension workspace retained for reference
   shared/        Shared helpers and types
   web/           Public app, dashboard, profiles, receipts, withdrawal UI
   gasstation/    Gas sponsorship and wallet experimentation workspace
@@ -65,7 +66,7 @@ Arc native gas is USDC-like with 18 decimals. The tipping ERC-20 USDC token uses
 
 - Node.js 18+
 - npm 9+
-- Chrome or Chromium for extension testing
+- Chrome or Chromium only if working on the legacy extension workspace
 - Privy app configured for Arc testnet smart wallets
 - Arc testnet RPC access
 - X Developer credentials for OAuth and creator identity lookup
@@ -102,7 +103,7 @@ Run the web app:
 npm run web:dev
 ```
 
-Build and load the extension:
+Build and load the legacy extension only when working on that workspace:
 
 ```bash
 npm run extension:build:dev
@@ -136,7 +137,6 @@ Required env:
 VITE_API_URL=https://api.getteep.xyz
 VITE_WEB_APP_URL=https://getteep.xyz
 VITE_RECEIPT_BASE_URL=https://getteep.xyz
-VITE_CHROME_STORE_URL=https://chromewebstore.google.com/detail/teep/REAL_EXTENSION_ID
 VITE_PRIVY_APP_ID=...
 ```
 
@@ -146,7 +146,7 @@ Build:
 npm run web:build:prod
 ```
 
-### Extension
+### Legacy Extension
 
 Required env:
 
@@ -164,7 +164,7 @@ Build:
 npm run extension:build:prod
 ```
 
-The production extension build removes localhost permissions, blocks debug flags, and disables production source maps.
+The extension workspace is retained for reference and experiments. It is not part of the primary Teep web/X bot product path.
 
 ### Backend
 
@@ -243,4 +243,4 @@ npm audit --omit=dev --audit-level=high --workspaces
 
 ## Status
 
-Teep is in beta preparation on Arc testnet. The repository includes the web app, extension, backend, contracts, production build guardrails, and operational documentation needed to move toward a public dapp release.
+Teep is in beta preparation on Arc testnet. The repository includes the web app, X agent, backend, contracts, retained legacy extension workspace, production build guardrails, and operational documentation needed to move toward a public dapp release.

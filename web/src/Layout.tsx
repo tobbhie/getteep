@@ -1,6 +1,6 @@
 import { ReactNode, useState, useRef, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { CHROME_STORE_URL, DOCS_URL, GITHUB_URL, TWITTER_URL, DISCORD_URL, HAS_CHROME_STORE_LISTING } from "./config";
+import { DOCS_URL, GITHUB_URL, TWITTER_URL, DISCORD_URL } from "./config";
 
 export default function Layout({ children }: { children: ReactNode }) {
   const location = useLocation();
@@ -20,12 +20,13 @@ export default function Layout({ children }: { children: ReactNode }) {
   const isHome = location.pathname === "/";
   const isTipPost = location.pathname.startsWith("/t/");
   const isOps = location.pathname.startsWith("/ops");
+  const isXIntentPage = location.pathname === "/register" || location.pathname === "/fund" || location.pathname.startsWith("/x/");
   const isPublicProfile =
     location.pathname.startsWith("/profile/") ||
     location.pathname.startsWith("/tipper/") ||
     location.pathname.startsWith("/u/") ||
     (location.pathname.startsWith("/creator/") && !isCreatorDashboard);
-  const isPublicWide = location.pathname === "/leaderboard" || isPublicProfile || isTipPost;
+  const isPublicWide = location.pathname === "/leaderboard" || isPublicProfile || isTipPost || isXIntentPage;
   const isUtilityPage = ["/fees", "/privacy", "/support", "/terms"].includes(location.pathname);
   const hideGlobalNav = isDashboard || isReceipt || isOps || location.pathname.startsWith("/profile/tipper/") || location.pathname.startsWith("/tipper/");
 
@@ -216,9 +217,7 @@ export default function Layout({ children }: { children: ReactNode }) {
                 <h4>Resources</h4>
                 <a href={DOCS_URL} target="_blank" rel="noopener noreferrer">Docs</a>
                 <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
-                <a href={CHROME_STORE_URL} target="_blank" rel="noopener noreferrer">
-                  {HAS_CHROME_STORE_LISTING ? "Extension" : "Beta Access"}
-                </a>
+                <Link to="/support">Support</Link>
               </div>
             </div>
           </div>

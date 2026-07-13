@@ -19,7 +19,7 @@ In local development, missing env vars fall back to localhost/API defaults where
 
 ## Production Build
 
-Production builds are guarded. They fail if required env vars are missing, if localhost URLs are used, or if the Chrome Store URL is still a placeholder.
+Production builds are guarded. They fail if required env vars are missing or localhost URLs are used.
 
 Required env:
 
@@ -27,7 +27,6 @@ Required env:
 VITE_API_URL=https://api.getteep.xyz
 VITE_WEB_APP_URL=https://getteep.xyz
 VITE_RECEIPT_BASE_URL=https://getteep.xyz
-VITE_CHROME_STORE_URL=https://chromewebstore.google.com/detail/teep/REAL_EXTENSION_ID
 VITE_PRIVY_APP_ID=...
 ```
 
@@ -39,7 +38,7 @@ npm run build:prod
 
 ## Routes
 
-- `/` - home / extension CTA
+- `/` - home / product CTA
 - `/dashboard` - signed-in dashboard
 - `/dashboard/withdraw` - withdrawal flow
 - `/dashboard/grow-tips` - Grow Tips placeholder
@@ -56,5 +55,5 @@ npm run build:prod
 ## Notes
 
 - Current chain target is Arc testnet.
-- The web Privy app ID should match the extension Privy app ID.
+- The web Privy app ID should match the backend auth configuration.
 - Production source maps are disabled in `vite.config.ts`.

@@ -53,6 +53,9 @@ export default function FundAccount() {
   const recipient = (searchParams.get("recipient") || "").replace(/^@/, "").trim();
   const amount = (searchParams.get("amount") || "").replace(/^\$/, "").trim();
   const hasXTipContext = intent === "x-tip" && recipient && /^\d+(\.\d{1,2})?$/.test(amount);
+  const [fiatAmount, setFiatAmount] = useState(hasXTipContext ? amount : "10.00");
+  const [onrampLoading, setOnrampLoading] = useState(false);
+  const [onrampStatus, setOnrampStatus] = useState("");
   const fundingPolicy = buildFundingPolicy({
     environment: FUNDING_ENV,
     faucetUrl: FAUCET_URL,
@@ -62,9 +65,25 @@ export default function FundAccount() {
     enableFiatOfframp: ENABLE_FIAT_OFFRAMP,
   });
 
-  const onrampUrl = address && fundingPolicy.providers.fiatOnramp.enabled && fundingPolicy.providers.fiatOnramp.url
-    ? fundingPolicy.providers.fiatOnramp.url.replace("WALLET", address)
-    : "";
+  const createWalletProof = useCallback(async (purpose: string) => {
+    if (!address || !smartWalletClient) {
+      throw new Error("Wallet not ready");
+    }
+    const challengeRes = await fetch(`${API_BASE}/auth/wallet/challenge`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ address, purpose }),
+    });
+    const challenge = await challengeRes.json();
+    if (!challengeRes.ok || !challenge.message) {
+      throw new Error(challenge.error || "Could not verify wallet");
+    }
+    const signature = await smartWalletClient.signMessage({
+      account: smartWalletClient.account,
+      message: challenge.message,
+    } as any);
+    return { message: challenge.message, signature };
+  }, [address, smartWalletClient]);
 
   useEffect(() => {
     if (!address) return;
@@ -111,6 +130,51 @@ export default function FundAccount() {
     setFaucetLoading(false);
     window.setTimeout(() => setFaucetStatus(""), 5000);
   }, [address, fundingPolicy]);
+
+  const startCrossmintOnramp = useCallback(async () => {
+    if (!fundingPolicy.providers.fiatOnramp.enabled) {
+      setOnrampStatus(fundingPolicy.providers.fiatOnramp.disabledReason || "Crossmint funding is not available yet.");
+      return;
+    }
+    const normalizedAmount = fiatAmount.trim().replace(/^\$/, "");
+    if (!/^(0|[1-9][0-9]*)(\.[0-9]{1,2})?$/.test(normalizedAmount) || Number(normalizedAmount) <= 0) {
+      setOnrampStatus("Enter a valid funding amount.");
+      return;
+    }
+    setOnrampLoading(true);
+    setOnrampStatus("");
+    try {
+      const walletProof = await createWalletProof("funding");
+      const response = await fetch(`${API_BASE}/crossmint/onramp/orders`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ownerAddress: address,
+          walletAddress: address,
+          amountUsd: normalizedAmount,
+          email: user?.email?.address,
+          walletProof,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Could not start Crossmint funding.");
+      }
+      if (payload.redirectUrl) {
+        window.open(payload.redirectUrl, "_blank", "noopener,noreferrer");
+        setOnrampStatus("Crossmint staging opened. Complete the provider flow there.");
+      } else {
+        setOnrampStatus(payload.orderId
+          ? "Crossmint order created. Embedded checkout is not configured for this build yet."
+          : "Crossmint order created, but no checkout URL was returned.");
+      }
+    } catch (error) {
+      setOnrampStatus(error instanceof Error ? error.message : "Could not start Crossmint funding.");
+    } finally {
+      setOnrampLoading(false);
+      window.setTimeout(() => setOnrampStatus(""), 7000);
+    }
+  }, [address, createWalletProof, fiatAmount, fundingPolicy, user?.email?.address]);
 
   if (!ready) {
     return <DashboardPreparingPage title="Add funds" message="Preparing your funding options." />;
@@ -168,14 +232,37 @@ export default function FundAccount() {
       </div>
 
       <div className="dashboard-funding-options" style={{ display: "grid", gap: "var(--space-3)" }}>
-        {onrampUrl ? (
-          <a href={onrampUrl} target="_blank" rel="noopener noreferrer" className="dashboard-funding-option">
+        {fundingPolicy.providers.fiatOnramp.enabled ? (
+          <>
+          <label style={{ display: "grid", gap: 8 }}>
+            <span className="dashboard-metric-label">Amount to add</span>
+            <span style={{ position: "relative", display: "flex", alignItems: "center" }}>
+              <span style={{ position: "absolute", left: 12, color: "var(--text-muted)", fontWeight: 800 }}>$</span>
+              <input
+                value={fiatAmount}
+                onChange={(event) => setFiatAmount(event.target.value)}
+                inputMode="decimal"
+                placeholder="10.00"
+                style={{
+                  width: "100%",
+                  padding: "12px 12px 12px 28px",
+                  borderRadius: "var(--radius-sm)",
+                  border: "1px solid var(--border)",
+                  background: "var(--bg-page)",
+                  color: "var(--text-primary)",
+                  fontWeight: 800,
+                }}
+              />
+            </span>
+          </label>
+          <button type="button" onClick={startCrossmintOnramp} disabled={onrampLoading} className="dashboard-funding-option">
             <span>
               <strong>{fundingPolicy.providers.fiatOnramp.label}</strong>
               <small>{fundingPolicy.providers.fiatOnramp.description}</small>
             </span>
-            <span>Open</span>
-          </a>
+            <span>{onrampLoading ? "..." : "Start"}</span>
+          </button>
+          </>
         ) : (
           <button type="button" className="dashboard-funding-option" disabled title={fundingPolicy.providers.fiatOnramp.disabledReason}>
             <span>
@@ -207,6 +294,7 @@ export default function FundAccount() {
         <p className="dashboard-funding-note" style={{ margin: 0 }}>{fundingPolicy.testnetCopy}</p>
         {copyStatus && <p className="dashboard-funding-note dashboard-funding-note--status" style={{ margin: 0 }}>{copyStatus}</p>}
         {faucetStatus && <p className="dashboard-funding-note dashboard-funding-note--status" style={{ margin: 0 }}>{faucetStatus}</p>}
+        {onrampStatus && <p className="dashboard-funding-note dashboard-funding-note--status" style={{ margin: 0 }}>{onrampStatus}</p>}
       </div>
     </section>
   );

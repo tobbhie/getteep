@@ -24,22 +24,22 @@ export default function Privacy() {
       </p>
 
       <p style={{ ...sectionStyle, color: "var(--text-primary)" }}>
-        Teep respects your privacy. This policy covers the Teep website, dashboards, and browser extension.
+        Teep respects your privacy. This policy covers the Teep website, dashboards, and connected X tipping features.
         We do not sell personal data or use it for advertising.
       </p>
 
-      <h2 style={headingStyle}>What the extension accesses</h2>
+      <h2 style={headingStyle}>What Teep accesses</h2>
       <p style={sectionStyle}>
-        On supported X and Twitter pages, the extension reads the current post URL, post identifier, creator
-        handle, and visible post context needed to display Teep controls and prepare a tip. It does not collect
-        your general browsing history or read pages outside the sites listed in the extension permissions.
+        Teep processes the account, wallet, creator, post, and transaction details needed to prepare tips,
+        show receipts, verify creators, and process X tip commands you enable. Teep does not collect your
+        general browsing history.
       </p>
 
       <h2 style={headingStyle}>Information we collect</h2>
       <ul style={{ ...sectionStyle, paddingLeft: "var(--space-5)" }}>
         <li><strong style={{ color: "var(--text-primary)" }}>Account and identity:</strong> email address, connected wallet addresses, X handle, X verification state, and creator profile information.</li>
         <li><strong style={{ color: "var(--text-primary)" }}>Tips and account activity:</strong> tip intents, transaction hashes, balances, withdrawals, referrals, receipts, and related creator or post identifiers.</li>
-        <li><strong style={{ color: "var(--text-primary)" }}>Extension preferences:</strong> display settings, receipt preferences, acknowledged notices, and temporary transaction state used to prevent duplicate submissions.</li>
+        <li><strong style={{ color: "var(--text-primary)" }}>Product preferences:</strong> receipt preferences, X command limits, acknowledged notices, and temporary transaction state used to prevent duplicate submissions.</li>
         <li><strong style={{ color: "var(--text-primary)" }}>Technical and security data:</strong> IP address, browser or device information, request logs, errors, and abuse-prevention signals.</li>
         <li><strong style={{ color: "var(--text-primary)" }}>Public blockchain data:</strong> wallet addresses and transactions are public and may remain permanently available on the blockchain.</li>
       </ul>
@@ -48,7 +48,7 @@ export default function Privacy() {
       <p style={sectionStyle}>
         We use this information only to provide Teep features, authenticate users, create and secure wallets,
         prepare and record transactions, prevent duplicate or fraudulent activity, show receipts and history,
-        provide support, maintain the beta, and comply with applicable law. We do not use extension data for
+        provide support, maintain the beta, and comply with applicable law. We do not use product data for
         credit decisions, advertising, or sale to data brokers.
       </p>
 
@@ -72,10 +72,9 @@ export default function Privacy() {
 
       <h2 style={headingStyle}>Browser storage</h2>
       <p style={sectionStyle}>
-        The extension stores account state, preferences, pending transaction records, and recent activity in
-        Chrome extension storage. Sensitive transaction state is restricted to trusted extension pages. You can
-        clear local extension data by removing the extension, although this does not delete Teep account records
-        or public blockchain transactions.
+        The Teep web app may store local session preferences and temporary transaction state in your browser
+        to keep the product usable between visits and prevent duplicate submissions. Clearing local browser
+        storage does not delete Teep account records or public blockchain transactions.
       </p>
 
       <h2 style={headingStyle}>Retention</h2>

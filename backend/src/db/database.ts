@@ -570,9 +570,31 @@ const schemaSql = `
   ALTER TABLE x_bot_tips
     ADD COLUMN IF NOT EXISTS tx_hash TEXT;
 
+  ALTER TABLE x_bot_tips
+    ADD COLUMN IF NOT EXISTS tip_kind TEXT NOT NULL DEFAULT 'direct_creator_tip';
+
+  ALTER TABLE x_bot_tips
+    ADD COLUMN IF NOT EXISTS content_id TEXT;
+
+  ALTER TABLE x_bot_tips
+    ADD COLUMN IF NOT EXISTS context_tweet_id TEXT;
+
+  ALTER TABLE x_bot_tips
+    ADD COLUMN IF NOT EXISTS context_author_id TEXT;
+
+  ALTER TABLE x_bot_tips
+    ADD COLUMN IF NOT EXISTS context_author_username TEXT;
+
+  ALTER TABLE x_bot_tips
+    ADD COLUMN IF NOT EXISTS context_author_name TEXT;
+
+  ALTER TABLE x_bot_tips
+    ADD COLUMN IF NOT EXISTS context_author_profile_image_url TEXT;
+
   CREATE INDEX IF NOT EXISTS idx_x_bot_tips_sender ON x_bot_tips(sender_address, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_x_bot_tips_recipient ON x_bot_tips(recipient_address, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_x_bot_tips_tx_hash ON x_bot_tips(LOWER(tx_hash));
+  CREATE INDEX IF NOT EXISTS idx_x_bot_tips_content_id ON x_bot_tips(LOWER(content_id));
 
   CREATE TABLE IF NOT EXISTS claimable_tips (
     id TEXT PRIMARY KEY,

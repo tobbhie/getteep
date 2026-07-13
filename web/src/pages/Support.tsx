@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 const faqItems: { q: string; a: React.ReactNode }[] = [
   {
     q: "How do I tip?",
-    a: "Install the Teep extension for Chrome or Brave, add test funds, then use the Tip button on a supported post on X.",
+    a: "Launch the Teep web app, add test funds, then tip from a creator page, direct post tip link, or a supported X tip command.",
   },
   {
     q: "How do I add funds?",
@@ -25,7 +25,7 @@ const faqItems: { q: string; a: React.ReactNode }[] = [
   },
   {
     q: "How do I get a receipt?",
-    a: "After you tip, you can open or share the transaction receipt. Activity may appear in the extension before the web indexer catches up.",
+    a: "After you tip, you can open or share the transaction receipt. Activity may take a short moment to appear while the web indexer catches up.",
   },
   {
     q: "I am a creator. How do I receive tips?",
@@ -67,7 +67,7 @@ export default function Support() {
 
       <h2 style={headingStyle}>What we can help with</h2>
       <ul style={{ color: "var(--text-secondary)", lineHeight: "var(--line-relaxed)", paddingLeft: "var(--space-5)" }}>
-        <li>Installing the extension and connecting your account</li>
+        <li>Launching the web app and connecting your account</li>
         <li>Using test funds and withdrawing to a compatible wallet</li>
         <li>Creator verification, referrals, balances, and receipts</li>
         <li>Missing or delayed indexed activity</li>
@@ -85,8 +85,8 @@ export default function Support() {
         connected X handle. We may ask you to verify ownership before deleting account records.
       </p>
       <p style={{ color: "var(--text-secondary)", lineHeight: "var(--line-relaxed)", marginBottom: "var(--space-2)" }}>
-        Removing the extension clears extension data from that browser. Public blockchain transactions cannot be
-        deleted, and limited records may be retained when required for security, fraud prevention, or legal obligations.
+        Account deletion removes Teep-controlled account records where possible. Public blockchain transactions cannot
+        be deleted, and limited records may be retained when required for security, fraud prevention, or legal obligations.
       </p>
 
       <h2 style={headingStyle}>Limits</h2>

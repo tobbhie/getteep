@@ -437,12 +437,17 @@ function csvCell(value: string | number | null | undefined): string {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
+function xPostUrlForHistory(item: Pick<HistoryItem, "author_handle" | "tweet_author_handle" | "tweet_id">) {
+  const handle = (item.tweet_author_handle || item.author_handle || "").replace(/^@/, "");
+  return handle && item.tweet_id ? `https://x.com/${handle}/status/${item.tweet_id}` : "";
+}
+
 function downloadActivityCsv(items: HistoryItem[]) {
   const rows = [
     ["date", "type", "creator_handle", "amount_usd", "status", "post_url", "receipt_url", "tx_hash"],
     ...items.map((item) => {
       const handle = item.author_handle?.replace(/^@/, "") || "";
-      const postUrl = handle && item.tweet_id ? `https://x.com/${handle}/status/${item.tweet_id}` : "";
+      const postUrl = xPostUrlForHistory(item);
       const receiptUrl = item.tx_hash ? `${RECEIPT_BASE_URL}/tx/${item.tx_hash}` : "";
       return [
         formatHistoryTime(item.timestamp),
@@ -474,6 +479,7 @@ interface HistoryItem {
   tx_hash?: string;
   timestamp: number;
   author_handle?: string;
+  tweet_author_handle?: string;
   profileImageUrl?: string | null;
   tweet_id?: string;
   from_addr?: string;
@@ -1149,10 +1155,6 @@ export default function Dashboard({ mode = "auto" }: { mode?: DashboardMode }) {
     enableFiatOfframp: ENABLE_FIAT_OFFRAMP,
   });
 
-  const onrampUrl = address && fundingPolicy.providers.fiatOnramp.enabled && fundingPolicy.providers.fiatOnramp.url
-    ? fundingPolicy.providers.fiatOnramp.url.replace("WALLET", address)
-    : "";
-
   const copyDepositAddress = useCallback(() => {
     if (!address) return;
     navigator.clipboard.writeText(address).then(() => {
@@ -1204,10 +1206,11 @@ export default function Dashboard({ mode = "auto" }: { mode?: DashboardMode }) {
   }, [address]);
 
   const shareHistoryOnX = useCallback((item: HistoryItem) => {
+    const isDirectTip = item.type === "direct_creator_tip";
     const text = buildReceiptTweetText({
       amount: formatUsdRaw(item.amount),
       authorHandle: item.author_handle,
-      tweetId: item.tweet_id,
+      tweetId: isDirectTip ? undefined : item.tweet_id,
       txHash: item.tx_hash,
       shareAmount: receiptPrefs.shareAmountEnabled,
     });
@@ -1491,14 +1494,14 @@ export default function Dashboard({ mode = "auto" }: { mode?: DashboardMode }) {
                     >
                       <div className="dashboard-funding-title">Add Funds</div>
                       <div className="dashboard-funding-options">
-                        {onrampUrl ? (
-                          <a href={onrampUrl} target="_blank" rel="noopener noreferrer" className="dashboard-funding-option">
+                        {fundingPolicy.providers.fiatOnramp.enabled ? (
+                          <Link to="/fund" className="dashboard-funding-option">
                             <span>
                               <strong>{fundingPolicy.providers.fiatOnramp.label}</strong>
                               <small>{fundingPolicy.providers.fiatOnramp.description}</small>
                             </span>
-                            <span>Open</span>
-                          </a>
+                            <span>Start</span>
+                          </Link>
                         ) : (
                           <button type="button" className="dashboard-funding-option" disabled title={fundingPolicy.providers.fiatOnramp.disabledReason}>
                             <span>
@@ -1810,9 +1813,9 @@ export default function Dashboard({ mode = "auto" }: { mode?: DashboardMode }) {
                                 </td>
                                 <td className="dashboard-history-actions-cell">
                                   <div className="dashboard-history-actions" aria-label="Activity actions">
-                                    {item.author_handle && item.tweet_id && (
+                                    {xPostUrlForHistory(item) && (
                                       <a
-                                        href={`https://x.com/${item.author_handle.replace(/^@/, "")}/status/${item.tweet_id}`}
+                                        href={xPostUrlForHistory(item)}
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         className="dashboard-history-action"
@@ -1842,9 +1845,9 @@ export default function Dashboard({ mode = "auto" }: { mode?: DashboardMode }) {
                                     </button>
                                     {isActionMenuOpen && (
                                       <div className="dashboard-history-actions-menu">
-                                        {item.author_handle && item.tweet_id && (
+                                        {xPostUrlForHistory(item) && (
                                           <a
-                                            href={`https://x.com/${item.author_handle.replace(/^@/, "")}/status/${item.tweet_id}`}
+                                            href={xPostUrlForHistory(item)}
                                             target="_blank"
                                             rel="noopener noreferrer"
                                             className="dashboard-history-action"
@@ -2109,9 +2112,11 @@ export default function Dashboard({ mode = "auto" }: { mode?: DashboardMode }) {
                 <div className="creator-tip-list">
                   {pagedReceivedTips.map((item) => {
                     const handle = item.author_handle?.replace(/^@/, "");
-                    const postUrl = handle && item.tweet_id ? `https://x.com/${handle}/status/${item.tweet_id}` : "";
+                    const tweetAuthorHandle = (item.tweet_author_handle || item.author_handle || "").replace(/^@/, "");
+                    const postUrl = xPostUrlForHistory(item);
                     const supporter = item.from_addr || item.from_address || "";
                     const supporterName = displayAddressName(supporter, item.fromIdentity);
+                    const isDirectTip = item.type === "direct_creator_tip";
                     return (
                       <article className="creator-tip-row" key={`${item.tx_hash || item.timestamp}-${item.amount}`}>
                         <div className="creator-supporter-avatar">{initialsForIdentity(supporter, item.fromIdentity)}</div>
@@ -2119,7 +2124,7 @@ export default function Dashboard({ mode = "auto" }: { mode?: DashboardMode }) {
                           <div className="creator-tip-title">
                             {supporterName} tipped you <span>${formatUsdRaw(item.amount)}</span>
                           </div>
-                          <p>{handle ? `For a verified X post by @${handle}` : "For creator support on Teep"}</p>
+                          <p>{isDirectTip ? "Direct creator support on Teep" : tweetAuthorHandle ? `For a verified X post by @${tweetAuthorHandle}` : handle ? `For a verified X post by @${handle}` : "For creator support on Teep"}</p>
                           <div className="creator-row-actions">
                             {postUrl && <a href={postUrl} target="_blank" rel="noopener noreferrer">View post</a>}
                             <button type="button" onClick={() => shareHistoryOnX(item)}>Share</button>

@@ -65,6 +65,7 @@ router.get("/recent-tips", async (req: Request, res: Response) => {
   const rows = await db
     .prepare(
       `SELECT t.amount, t.author_id, t.from_address, t.timestamp, t.content_id,
+              m.author_handle AS creator_handle,
               m.author_handle AS meta_handle, m.tweet_id AS meta_tweet_id
        FROM tips t
        LEFT JOIN tip_metadata m ON t.content_id = m.content_id
@@ -79,6 +80,7 @@ router.get("/recent-tips", async (req: Request, res: Response) => {
       content_id: string;
       meta_handle: string | null;
       meta_tweet_id: string | null;
+      creator_handle?: string | null;
     }>;
   const xBotRows = await db
     .prepare(
@@ -86,8 +88,13 @@ router.get("/recent-tips", async (req: Request, res: Response) => {
               xbt.recipient_x_user_id as author_id,
               xbt.sender_address as from_address,
               CAST(xbt.created_at / 1000 AS INTEGER) as timestamp,
-              xbt.recipient_x_username as meta_handle,
-              xbt.source_tweet_id as meta_tweet_id
+              xbt.recipient_x_username as creator_handle,
+              CASE
+                WHEN COALESCE(xbt.tip_kind, 'direct_creator_tip') = 'post_tip'
+                  THEN COALESCE(xbt.context_author_username, xbt.recipient_x_username)
+                ELSE xbt.context_author_username
+              END as meta_handle,
+              COALESCE(xbt.context_tweet_id, xbt.source_tweet_id) as meta_tweet_id
        FROM x_bot_tips xbt
        WHERE xbt.status = 'completed'
          AND NOT EXISTS (
@@ -104,6 +111,7 @@ router.get("/recent-tips", async (req: Request, res: Response) => {
       timestamp: number;
       meta_handle: string | null;
       meta_tweet_id: string | null;
+      creator_handle?: string | null;
     }>;
   const mergedRows = [...rows, ...xBotRows]
     .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0))
@@ -131,7 +139,7 @@ router.get("/recent-tips", async (req: Request, res: Response) => {
     const senderIdentity = identities.get(r.from_address.toLowerCase());
     return {
       amountUsd: (Number(r.amount) / 1e6).toFixed(2),
-      creatorUsername: byAuthor[r.author_id] ?? r.meta_handle ?? null,
+      creatorUsername: byAuthor[r.author_id] ?? r.creator_handle ?? r.meta_handle ?? null,
       postAuthorHandle: r.meta_handle ?? null,
       fromAddress: r.from_address,
       fromIdentity: senderIdentity

@@ -5,6 +5,7 @@ type ProviderKind = "faucet" | "crypto_receive" | "fiat_onramp" | "fiat_offramp"
 type ProviderStatus = "created" | "pending" | "completed" | "failed" | "cancelled";
 
 interface CreateFundingProviderSessionInput {
+  id?: string;
   provider: string;
   kind: ProviderKind;
   userAddress?: string | null;
@@ -29,7 +30,7 @@ function safeJson(metadata?: Record<string, unknown>): string | null {
 }
 
 export async function createFundingProviderSession(input: CreateFundingProviderSessionInput): Promise<string> {
-  const id = randomUUID();
+  const id = input.id || randomUUID();
   const now = Date.now();
   await run(`
     INSERT INTO funding_provider_sessions (
@@ -56,6 +57,32 @@ export async function updateFundingProviderSessionStatus(id: string, status: Pro
     SET status = ?, metadata_json = COALESCE(?, metadata_json), updated_at = ?
     WHERE id = ?
   `, [status, safeJson(metadata), Date.now(), id]);
+}
+
+export async function updateFundingProviderSession(input: {
+  id: string;
+  status?: ProviderStatus;
+  providerSessionId?: string | null;
+  redirectUrl?: string | null;
+  metadata?: Record<string, unknown>;
+}): Promise<void> {
+  await run(`
+    UPDATE funding_provider_sessions
+    SET
+      status = COALESCE(?, status),
+      provider_session_id = COALESCE(?, provider_session_id),
+      redirect_url = COALESCE(?, redirect_url),
+      metadata_json = COALESCE(?, metadata_json),
+      updated_at = ?
+    WHERE id = ?
+  `, [
+    input.status || null,
+    input.providerSessionId || null,
+    input.redirectUrl || null,
+    safeJson(input.metadata),
+    Date.now(),
+    input.id,
+  ]);
 }
 
 export async function recordFundingProviderWebhook(input: RecordFundingProviderWebhookInput): Promise<void> {

@@ -8,6 +8,7 @@ export {
 export {
   buildFundingPolicy,
   fundingProviderDecision,
+  resolveFundingUrl,
 } from "./funding";
 export type {
   FundingEnvironment,

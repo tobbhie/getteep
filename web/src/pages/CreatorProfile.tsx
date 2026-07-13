@@ -34,6 +34,7 @@ type RecentTip = {
   txHash: string;
   tweetId: string | null;
   authorHandle: string | null;
+  tweetAuthorHandle?: string | null;
 };
 
 type ProfilePost = {
@@ -626,7 +627,7 @@ export default function CreatorProfile() {
                   {visibleTips.map((tip) => {
                     const label = supporterLabel(tip);
                     const sourceUrl = tip.tweetId
-                      ? `https://x.com/${(tip.authorHandle || profile.username).replace(/^@/, "")}/status/${tip.tweetId}`
+                      ? `https://x.com/${(tip.tweetAuthorHandle || tip.authorHandle || profile.username).replace(/^@/, "")}/status/${tip.tweetId}`
                       : null;
                     return (
                       <div className="creator-public-activity" key={`${tip.txHash}-${tip.timestamp}`}>
@@ -751,7 +752,7 @@ export default function CreatorProfile() {
             </section>
             <div className="creator-public-rail-note">
               <strong>Support from anywhere</strong>
-              <span>Tip from this profile, supported social posts, or the Teep browser extension.</span>
+              <span>Tip from this profile, supported social posts, or Teep X tip commands.</span>
             </div>
           </aside>
         </div>

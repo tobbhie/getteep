@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import * as QRCode from "qrcode";
-import { API_BASE, CHROME_STORE_URL, RECEIPT_BASE_URL, CHAIN_NAME, EXPLORER_TX_URL } from "../config";
+import { API_BASE, RECEIPT_BASE_URL, CHAIN_NAME, EXPLORER_TX_URL } from "../config";
 import { avatarErrorFallback, xAvatarUrl } from "../lib/avatar";
 
 interface ReceiptData {
@@ -18,6 +18,8 @@ interface ReceiptData {
   authorHandle: string | null;
   recipientHandle?: string | null;
   tweetAuthorHandle?: string | null;
+  tweetAuthorName?: string | null;
+  tweetAuthorProfileImageUrl?: string | null;
   tweetId: string | null;
   kind?: string;
   creatorClaimStatus?: "unclaimed" | "verified" | "claim_wallet_active";
@@ -435,7 +437,7 @@ export default function TxReceipt() {
     data.kind === "withdrawal" ? "Withdrawal Confirmed" :
     data.kind === "referral_fee_received" ? "Referral Earning Confirmed" :
     `${receiptKind} Sent Successfully`;
-  const tweetDisplayName = oembed?.author_name ?? (tweetAuthorHandle ? `@${tweetAuthorHandle}` : creatorHandle);
+  const tweetDisplayName = data.tweetAuthorName ?? oembed?.author_name ?? (tweetAuthorHandle ? `@${tweetAuthorHandle}` : creatorHandle);
   const tweetSnippet = oembed?.excerpt ?? "Post linked to this tip";
   const explorerUrl = `${EXPLORER_TX_URL}/${data.txHash}`;
   const dateStr = new Date(data.timestamp * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
@@ -475,7 +477,7 @@ export default function TxReceipt() {
           <div className="tx-receipt-tweet-card">
             <div className="tx-receipt-tweet-header">
               <img
-                src={xAvatarUrl(tweetAuthorHandle) || "/logo.svg"}
+                src={data.tweetAuthorProfileImageUrl || xAvatarUrl(tweetAuthorHandle) || "/logo.svg"}
                 alt=""
                 className="tx-receipt-tweet-avatar"
                 onError={(event) => avatarErrorFallback(event, tweetAuthorHandle)}
@@ -508,9 +510,6 @@ export default function TxReceipt() {
             <Link to={claimCtaPath} className="tx-receipt-claim-cta">
               Claim in web app
             </Link>
-            <a href={CHROME_STORE_URL} target="_blank" rel="noopener noreferrer" className="tx-receipt-claim-secondary">
-              Prefer the extension?
-            </a>
           </div>
         </div>}
 

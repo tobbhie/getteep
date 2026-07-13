@@ -271,19 +271,28 @@ function statusLabel(status: string) {
   return status.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function Toggle({ checked, onChange }: { checked: boolean; onChange: (next: boolean) => void }) {
+function Toggle({ checked, onChange, disabled = false }: { checked: boolean; onChange: (next: boolean) => void; disabled?: boolean }) {
   return (
     <button
       type="button"
       className={`dashboard-settings-toggle ${checked ? "is-on" : ""}`}
       role="switch"
       aria-checked={checked}
+      disabled={disabled}
       onClick={() => onChange(!checked)}
     >
       <span className="dashboard-settings-switch-handle" aria-hidden>
         <span className="dashboard-settings-switch-check material-symbols-outlined">check</span>
       </span>
     </button>
+  );
+}
+
+function HelperTip({ label }: { label: string }) {
+  return (
+    <span className="dashboard-settings-helper-tip" tabIndex={0} aria-label={label} data-tip={label}>
+      ?
+    </span>
   );
 }
 
@@ -351,6 +360,25 @@ export default function DashboardSettings() {
   const accountHelpRef = useRef<HTMLSpanElement>(null);
 
   const hasUnsavedChanges = !settingsEqual(settings, savedSettings);
+  const loadedXTippingEnabled = Boolean(xTippingStatus?.permissions?.enabled);
+  const loadedXMaxPerTip = rawToUsdInput(xTippingStatus?.permissions?.maxPerTipRaw);
+  const loadedXMaxDaily = rawToUsdInput(xTippingStatus?.permissions?.maxDailyRaw);
+  let draftXMaxPerTipRaw: string | null = null;
+  let draftXMaxDailyRaw: string | null = null;
+  try {
+    draftXMaxPerTipRaw = usdInputToRaw(xMaxPerTip);
+    draftXMaxDailyRaw = usdInputToRaw(xMaxDaily);
+  } catch {
+    draftXMaxPerTipRaw = null;
+    draftXMaxDailyRaw = null;
+  }
+  const hasXTippingChanges = Boolean(xTippingStatus?.xAccount) && (
+    xTippingEnabled !== loadedXTippingEnabled ||
+    (draftXMaxPerTipRaw === null ? xMaxPerTip.trim() !== loadedXMaxPerTip : draftXMaxPerTipRaw !== xTippingStatus?.permissions?.maxPerTipRaw) ||
+    (draftXMaxDailyRaw === null ? xMaxDaily.trim() !== loadedXMaxDaily : draftXMaxDailyRaw !== xTippingStatus?.permissions?.maxDailyRaw)
+  );
+  const canSaveXTipping = Boolean(xTippingStatus?.xAccount) && hasXTippingChanges && !xTippingLoading && !xTippingSaving;
+  const hasPendingSettingsChanges = hasUnsavedChanges || hasXTippingChanges;
 
   const showToast = useCallback((message: string) => {
     setToast(message);
@@ -476,14 +504,14 @@ export default function DashboardSettings() {
   }, [loadXTippingStatus]);
 
   useEffect(() => {
-    if (!hasUnsavedChanges) return;
+    if (!hasPendingSettingsChanges) return;
     const handler = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = "";
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, [hasUnsavedChanges]);
+  }, [hasPendingSettingsChanges]);
 
   useEffect(() => {
     if (!accountHelpOpen) return;
@@ -499,12 +527,12 @@ export default function DashboardSettings() {
   useEffect(() => {
     const requestedTab = searchParams.get("tab");
     if (!isSettingsTab(requestedTab) || requestedTab === activeTab) return;
-    if (hasUnsavedChanges) {
+    if (hasPendingSettingsChanges) {
       showToast("Save your changes before leaving this settings page.");
       return;
     }
     setActiveTab(requestedTab);
-  }, [activeTab, hasUnsavedChanges, searchParams, showToast]);
+  }, [activeTab, hasPendingSettingsChanges, searchParams, showToast]);
 
   const updateSettings = useCallback((patch: Partial<TipperSettings>) => {
     setSettings((current) => ({
@@ -521,7 +549,7 @@ export default function DashboardSettings() {
 
   const switchTab = useCallback((tab: SettingsTab) => {
     if (tab === activeTab) return;
-    if (hasUnsavedChanges) {
+    if (hasPendingSettingsChanges) {
       showToast("Save your changes before leaving this settings page.");
       return;
     }
@@ -535,7 +563,7 @@ export default function DashboardSettings() {
       }
       return next;
     }, { replace: true });
-  }, [activeTab, hasUnsavedChanges, setSearchParams, showToast]);
+  }, [activeTab, hasPendingSettingsChanges, setSearchParams, showToast]);
 
   const saveSettings = useCallback(async () => {
     const username = normalizeUsernameInput(settings.username);
@@ -852,7 +880,7 @@ export default function DashboardSettings() {
   const allTabs = [
     { id: "identity", icon: "badge", label: "Identity", detail: "Username and account" },
     { id: "funding", icon: "account_balance_wallet", label: isCreatorSettings ? "Payouts" : "Funding", detail: isCreatorSettings ? "Destination and history" : "Funding and withdrawals" },
-    { id: "tipping", icon: "payments", label: "Tipping", detail: "Extension default" },
+    { id: "tipping", icon: "payments", label: "Tipping", detail: "Tip defaults" },
     { id: "receipts", icon: "receipt_long", label: "Receipts", detail: "Sharing and exports" },
     { id: "grow", icon: "psychiatry", label: "Grow Tips", detail: "Strategy preferences" },
     { id: "notifications", icon: "notifications", label: "Notifications", detail: "Account alerts" },
@@ -872,7 +900,7 @@ export default function DashboardSettings() {
           <div className="dashboard-page-heading">
             <div>
               <h1>Settings</h1>
-              <p>{isCreatorSettings ? "Manage creator payouts, growth preferences, supporter engagement, and the shared Teep settings used across your account." : "Manage the account details and product preferences that shape your Teep experience across the dashboard and extension."}</p>
+              <p>{isCreatorSettings ? "Manage creator payouts, growth preferences, supporter engagement, and the shared Teep settings used across your account." : "Manage the account details and product preferences that shape your Teep experience across the dashboard."}</p>
             </div>
             <button type="button" className={hasUnsavedChanges ? "btn-primary" : "btn-secondary"} onClick={saveSettings} disabled={savingSettings || loadingSettings || !hasUnsavedChanges}>
               {savingSettings ? "Saving..." : hasUnsavedChanges ? "Save Changes" : "Saved"}
@@ -961,7 +989,7 @@ export default function DashboardSettings() {
                   <div className="dashboard-settings-panel-head">
                     <div><h3>Tipping preferences</h3><p>Set defaults for social post tipping, including the X commands Teep can process from your connected account.</p></div>
                   </div>
-                  <div className="dashboard-settings-panel-body">
+                  <div className="dashboard-settings-panel-body dashboard-settings-panel-body--tipping">
                     <div className="dashboard-settings-subcard dashboard-settings-x-tipping-card">
                       <div className="dashboard-settings-preference-head">
                         <div className="dashboard-settings-preference-title">
@@ -982,43 +1010,46 @@ export default function DashboardSettings() {
                             </div>
                           </div>
                         </div>
-                        <div className="dashboard-settings-preference-actions">
-                          {xTippingStatus?.xAccount ? (
-                            <button type="button" className="btn-secondary" onClick={startXTippingLink} disabled={xTippingLinking}>
-                              {xTippingLinking ? "Opening X..." : "Reconnect X"}
-                            </button>
-                          ) : (
-                            <button type="button" className="btn-secondary" onClick={startXTippingLink} disabled={xTippingLinking}>
-                              {xTippingLinking ? "Opening X..." : "Connect X"}
-                            </button>
-                          )}
-                          <button type="button" className="btn-primary" onClick={() => void saveXTippingPermissions()} disabled={xTippingLoading || xTippingSaving || !xTippingStatus?.xAccount}>
-                            {xTippingSaving ? "Saving..." : "Save X tipping"}
-                          </button>
-                        </div>
                       </div>
 
-                      <div className="dashboard-settings-command-row">
-                        <div>
-                          <strong>Allow X tip commands</strong>
-                          <span>Enable tipping directly from your X timeline using commands like <code>@teepagent tip @creator $5</code>. You must be authenticated to authorize these commands.</span>
+                      <button type="button" className="dashboard-settings-x-link-row" onClick={startXTippingLink} disabled={xTippingLinking}>
+                        <span className="dashboard-settings-preference-icon material-symbols-outlined" aria-hidden>link</span>
+                        <span>
+                          <strong>{xTippingStatus?.xAccount ? "Reconnect X" : "Connect X"}</strong>
+                          <small>{xTippingStatus?.xAccount ? "Re-link your X account" : "Link your X account"}</small>
+                        </span>
+                        <span className="material-symbols-outlined" aria-hidden>{xTippingLinking ? "more_horiz" : "chevron_right"}</span>
+                      </button>
+
+                      <div className="dashboard-settings-section-kicker">Tipping settings</div>
+
+                      <div className="dashboard-settings-command-row dashboard-settings-command-row--compact">
+                        <div className="dashboard-settings-command-copy">
+                          <span className="dashboard-settings-label-with-help">
+                            <strong>Allow X tip commands</strong>
+                            <HelperTip label="Enable tipping from X commands such as @teepagent tip @creator $5. Your connected Teep account must authorize the limits before commands can run." />
+                          </span>
+                          <span>Process tip commands from your connected X account.</span>
                         </div>
-                          <Toggle
-                            checked={xTippingEnabled}
-                            onChange={(next) => {
-                              if (next && !xTippingStatus?.xAccount) {
-                                showToast("Connect X before enabling X tipping.");
-                                return;
-                              }
-                              setXTippingEnabled(next);
-                              void saveXTippingPermissions(next);
-                            }}
-                          />
+                        <Toggle
+                          checked={xTippingEnabled}
+                          disabled={xTippingLoading || xTippingSaving}
+                          onChange={(next) => {
+                            if (next && !xTippingStatus?.xAccount) {
+                              showToast("Connect X before enabling X tipping.");
+                              return;
+                            }
+                            setXTippingEnabled(next);
+                          }}
+                        />
                       </div>
 
                       <div className="dashboard-settings-two-col dashboard-settings-two-col--wide">
                         <div className="dashboard-settings-limit-field">
-                          <label htmlFor="x-max-per-tip">Max per tip on X</label>
+                          <span className="dashboard-settings-label-with-help">
+                            <label htmlFor="x-max-per-tip">Max per tip on X</label>
+                            <HelperTip label="Maximum amount allowed for a single X tip command." />
+                          </span>
                           <div className="dashboard-settings-input-row is-readonly">
                             <span aria-hidden>$</span>
                             <input
@@ -1029,10 +1060,12 @@ export default function DashboardSettings() {
                               disabled={xTippingLoading || xTippingSaving}
                             />
                           </div>
-                          <p>Maximum amount allowed for a single X tip command.</p>
                         </div>
                         <div className="dashboard-settings-limit-field">
-                          <label htmlFor="x-max-daily">Daily tip limit on X</label>
+                          <span className="dashboard-settings-label-with-help">
+                            <label htmlFor="x-max-daily">Daily tip limit on X</label>
+                            <HelperTip label="Total combined value of X tip commands allowed in a 24-hour window." />
+                          </span>
                           <div className="dashboard-settings-input-row is-readonly">
                             <span aria-hidden>$</span>
                             <input
@@ -1043,21 +1076,25 @@ export default function DashboardSettings() {
                               disabled={xTippingLoading || xTippingSaving}
                             />
                           </div>
-                          <p>Total combined value of tips allowed in a 24-hour window.</p>
                         </div>
                       </div>
 
                       {!xTippingStatus?.xAccount && (
                         <p className="dashboard-settings-status dashboard-settings-status--muted">Connect X before enabling social tip commands.</p>
                       )}
+
+                      <button type="button" className="btn-primary dashboard-settings-x-save" onClick={() => void saveXTippingPermissions()} disabled={!canSaveXTipping}>
+                        <span className="material-symbols-outlined" aria-hidden>save</span>
+                        {xTippingSaving ? "Saving..." : "Save X tipping"}
+                      </button>
                     </div>
 
-                    <div className="dashboard-settings-subcard dashboard-settings-extension-card">
+                    <div className="dashboard-settings-subcard dashboard-settings-tip-default-card">
                       <div className="dashboard-settings-preference-title">
-                        <span className="dashboard-settings-preference-icon material-symbols-outlined" aria-hidden>extension</span>
+                        <span className="dashboard-settings-preference-icon material-symbols-outlined" aria-hidden>payments</span>
                         <div>
-                          <h4>Extension default</h4>
-                          <p>Set the pre-filled amount for the browser extension popup.</p>
+                          <h4>Web tip default</h4>
+                          <p>Set the pre-filled amount for Teep tip forms.</p>
                         </div>
                       </div>
                       <div className="dashboard-settings-two-col">

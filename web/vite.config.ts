@@ -37,7 +37,7 @@ function collectAllowedHosts(env: Record<string, string>) {
 }
 
 function assertProductionEnv(env: Record<string, string>) {
-  const required = ["VITE_API_URL", "VITE_WEB_APP_URL", "VITE_PRIVY_APP_ID", "VITE_CHROME_STORE_URL"];
+  const required = ["VITE_API_URL", "VITE_WEB_APP_URL", "VITE_PRIVY_APP_ID"];
   const missing = required.filter((key) => !env[key]);
   if (missing.length) {
     throw new Error(`Production web build is missing required env: ${missing.join(", ")}`);
@@ -61,11 +61,6 @@ function assertProductionEnv(env: Record<string, string>) {
     if (LOCAL_URL_RE.test(value)) {
       throw new Error(`Production web build cannot use a local ${key}: ${value}`);
     }
-  }
-
-  const storeUrl = env.VITE_CHROME_STORE_URL;
-  if (storeUrl && /PLACEHOLDER/i.test(storeUrl)) {
-    throw new Error("Production web build cannot use the placeholder Chrome Store URL.");
   }
 }
 

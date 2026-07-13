@@ -10,16 +10,13 @@ const shouldUseSecureSameOriginApi =
 export const API_BASE = shouldUseSecureSameOriginApi
   ? ""
   : configuredApiUrl ?? (IS_PRODUCTION ? "" : "http://localhost:3001");
-const RAW_CHROME_STORE_URL = import.meta.env.VITE_CHROME_STORE_URL || "";
-export const HAS_CHROME_STORE_LISTING = !!RAW_CHROME_STORE_URL && !/PLACEHOLDER|REPLACE_WITH_EXTENSION_ID/i.test(RAW_CHROME_STORE_URL);
-export const CHROME_STORE_URL = HAS_CHROME_STORE_LISTING ? RAW_CHROME_STORE_URL : "/support";
 /** Docs and social - optional for footer/nav */
 export const DOCS_URL = import.meta.env.VITE_DOCS_URL || "#";
 export const GITHUB_URL = import.meta.env.VITE_GITHUB_URL || "https://github.com";
 export const TWITTER_URL = import.meta.env.VITE_TWITTER_URL || "https://x.com/teepxyz";
 export const DISCORD_URL = import.meta.env.VITE_DISCORD_URL || "#";
 
-/** Web app base URL (for redirects from extension) */
+/** Web app base URL for redirects and shared links. */
 const configuredWebAppUrl = import.meta.env.VITE_WEB_APP_URL || "";
 const configuredReceiptUrl = import.meta.env.VITE_RECEIPT_BASE_URL || "";
 const shouldUseBrowserOrigin = (configuredUrl: string) =>
@@ -40,10 +37,10 @@ export const RECEIPT_BASE_URL = trimTrailingSlash(
     : configuredReceiptUrl || browserOrigin || "https://getteep.xyz",
 );
 
-/** Privy - same app as extension for shared identity */
+/** Privy app used by the web experience. */
 export const PRIVY_APP_ID = import.meta.env.VITE_PRIVY_APP_ID || "cmoslas9401se0cjx2g6mk2a3";
 
-/** Chain config - must match extension */
+/** Chain config */
 export const CHAIN_ID = 5_042_002; // Arc Testnet
 export const CHAIN_NAME = "Arc Testnet";
 export const EXPLORER_TX_URL = import.meta.env.VITE_EXPLORER_TX_URL || "https://testnet.arcscan.app/tx";

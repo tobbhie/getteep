@@ -28,6 +28,7 @@ export type PublicProfileRecentTip = {
   txHash: string;
   tweetId: string | null;
   authorHandle: string | null;
+  tweetAuthorHandle: string | null;
 };
 
 export type PublicCreatorProfile = {
@@ -64,6 +65,7 @@ type RecentTipRow = {
   tx_hash: string;
   tweet_id: string | null;
   author_handle: string | null;
+  tweet_author_handle?: string | null;
 };
 
 function creatorTipPredicate(alias = "t"): string {
@@ -219,8 +221,13 @@ export async function getPublicCreatorProfileByUsername(usernameParam: string): 
               xbt.amount_raw as amount,
               CAST(xbt.created_at / 1000 AS INTEGER) as timestamp,
               xbt.tx_hash,
-              xbt.source_tweet_id as tweet_id,
-              xbt.recipient_x_username as author_handle
+              COALESCE(xbt.context_tweet_id, xbt.source_tweet_id) as tweet_id,
+              CASE
+                WHEN COALESCE(xbt.tip_kind, 'direct_creator_tip') = 'post_tip'
+                  THEN COALESCE(xbt.context_author_username, xbt.recipient_x_username)
+                ELSE xbt.recipient_x_username
+              END as author_handle,
+              xbt.context_author_username as tweet_author_handle
        FROM x_bot_tips xbt
        WHERE xbt.status = 'completed'
          AND (xbt.recipient_x_user_id = ? OR LOWER(COALESCE(xbt.recipient_x_username, '')) = LOWER(?))
@@ -316,6 +323,7 @@ export async function getPublicCreatorProfileByUsername(usernameParam: string): 
         txHash: tip.tx_hash,
         tweetId: tip.tweet_id,
         authorHandle: tip.author_handle,
+        tweetAuthorHandle: tip.tweet_author_handle ?? null,
       };
     }),
   };

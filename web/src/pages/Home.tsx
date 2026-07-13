@@ -4,7 +4,7 @@ import { useCreateWallet, usePrivy, useWallets } from "@privy-io/react-auth";
 import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
 import { parseUnits } from "viem";
 import { arcTestnet } from "../chains";
-import { API_BASE, CHROME_STORE_URL, HAS_CHROME_STORE_LISTING, USDC_ADDRESS } from "../config";
+import { API_BASE, USDC_ADDRESS } from "../config";
 import { computeContentId, encodeApproveCall, encodeTipCall, TIP_CONTRACT_ADDRESS } from "../lib/contracts";
 import LoginModal from "../components/LoginModal";
 import ConfirmTipModal from "../components/ConfirmTipModal";
@@ -86,7 +86,7 @@ function usernameFallback(email?: string | null) {
 const FAQ_ITEMS: Array<{ q: string; a: ReactNode }> = [
   {
     q: "What is Teep?",
-    a: "Teep is a social finance platform where people support creators and communities, while creators receive, withdraw, or grow what they earn. It works through the web app, browser extension, and connected social prompts.",
+    a: "Teep is a social finance platform where people support creators and communities, while creators receive, withdraw, or grow what they earn. It works through the web app and connected X tip commands.",
   },
   {
     q: "Does Teep hold my funds?",
@@ -662,11 +662,10 @@ export default function Home() {
             </div>
             <div className="lp-hero-actions">
               <a href="/dashboard" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn--primary"><Icon name="wallet" /> Launch App</a>
-              <a href={CHROME_STORE_URL} target={HAS_CHROME_STORE_LISTING ? "_blank" : undefined} rel={HAS_CHROME_STORE_LISTING ? "noopener noreferrer" : undefined} className="lp-btn lp-btn--secondary lp-hero-extension-cta">
-                <Icon name="puzzle" /> Get Extension
+              <a href="#how-it-works" className="lp-btn lp-btn--secondary lp-hero-how-cta">
+                <Icon name="checkCircle" /> How it Works
               </a>
             </div>
-            <p className="lp-hero-extension-note">Extension works best on desktop.</p>
           </div>
 
           <div className="lp-scroll-focus-backdrop" aria-hidden="true" />
@@ -819,7 +818,7 @@ export default function Home() {
                 <div className="lp-flow-icon"><Icon name="send" /></div>
                 <h3>Support where attention is</h3>
               </div>
-              <p>Use the web app, extension, or a connected social prompt without sending people to a new feed.</p>
+              <p>Use the web app or a connected X tip command without sending people to a new feed.</p>
               <button type="button" className="lp-flow-action" onClick={revealHeroTipForm}>
                 Try the web tip flow <Icon name="arrowRight" />
               </button>
@@ -992,8 +991,7 @@ export default function Home() {
               {(howTab === "tippers"
                 ? [
                     { label: "1a", title: "Use the web app", desc: "Tip from creator pages, discovery, or a direct Teep link.", ctaHref: "/creator/pipsandbills", ctaText: "Try it now" },
-                    { label: "1b", title: "Add the extension", desc: "Use the Teep action beside familiar social post controls.", ctaHref: CHROME_STORE_URL, ctaText: "Try it now", ctaExternal: HAS_CHROME_STORE_LISTING },
-                    { label: "1c", title: "Tag the X bot", desc: "Reply with a tip command and Teep returns the next step.", ctaHref: "https://twitter.com/intent/tweet?text=%40teepagent%20tip%20%40pipsandbills%20%241", ctaText: "Try it now", ctaExternal: true },
+                    { label: "1b", title: "Tag the X bot", desc: "Reply with a tip command and Teep returns the next step.", ctaHref: "https://twitter.com/intent/tweet?text=%40teepagent%20tip%20%40pipsandbills%20%241", ctaText: "Try it now", ctaExternal: true },
                     { label: "02", title: "Choose an amount", desc: "Pick a stable-value amount and review who receives it." },
                     { label: "03", title: "Confirm and get a receipt", desc: "Send once, then track the receipt from the same account." },
                   ]
@@ -1247,12 +1245,9 @@ export default function Home() {
           <h2 className="lp-cta-title">Support and grow with Teep.</h2>
           <p className="lp-cta-sub">One place for supporters to send and creators to receive, withdraw, or grow what they earn.</p>
           <div className="lp-cta-btns">
-            <a href={CHROME_STORE_URL} target={HAS_CHROME_STORE_LISTING ? "_blank" : undefined} rel={HAS_CHROME_STORE_LISTING ? "noopener noreferrer" : undefined} className="lp-btn lp-btn--inverse lp-btn--large">
-              <Icon name="puzzle" />
-              {HAS_CHROME_STORE_LISTING ? "Add to Chrome" : "Get Teep"}
-            </a>
-            <a href="/dashboard" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn--ghost lp-btn--large">
-              Open web app
+            <a href="/dashboard" target="_blank" rel="noopener noreferrer" className="lp-btn lp-btn--inverse lp-btn--large">
+              <Icon name="wallet" />
+              Launch App
             </a>
           </div>
         </div>

@@ -6,6 +6,7 @@ export type AccountActivityRecord = {
   tx_hash: string | null;
   timestamp: number;
   author_handle?: string | null;
+  tweet_author_handle?: string | null;
   profileImageUrl?: string | null;
   tweet_id?: string | null;
   from_addr?: string | null;
@@ -85,13 +86,14 @@ export async function getAccountActivity(options: {
       , [address, limit]);
 
   const xBotTipsSent = await query<AccountActivityRecord>(
-    `SELECT 'direct_creator_tip' as type,
+    `SELECT CASE WHEN COALESCE(tip_kind, 'direct_creator_tip') = 'post_tip' THEN 'tip_sent' ELSE 'direct_creator_tip' END as type,
             amount_raw as amount,
             tx_hash,
             CAST(created_at / 1000 AS INTEGER) as timestamp,
             recipient_x_username as author_handle,
-            source_tweet_id as tweet_id,
-            'X tip command' as detail,
+            context_author_username as tweet_author_handle,
+            COALESCE(context_tweet_id, source_tweet_id) as tweet_id,
+            CASE WHEN COALESCE(tip_kind, 'direct_creator_tip') = 'post_tip' THEN 'X post tip' ELSE 'X direct creator tip' END as detail,
             COALESCE(
               (SELECT profile_image_url FROM verified_claims WHERE author_id = xbt.recipient_x_user_id AND profile_image_url IS NOT NULL ORDER BY verified_at DESC LIMIT 1),
               (SELECT profile_image_url FROM verified_claims WHERE LOWER(username) = LOWER(COALESCE(xbt.recipient_x_username, '')) AND profile_image_url IS NOT NULL ORDER BY verified_at DESC LIMIT 1)
@@ -154,8 +156,9 @@ export async function getAccountActivity(options: {
               CAST(created_at / 1000 AS INTEGER) as timestamp,
               sender_address as from_addr,
               recipient_x_username as author_handle,
-              source_tweet_id as tweet_id,
-              'X tip command' as detail,
+              context_author_username as tweet_author_handle,
+              COALESCE(context_tweet_id, source_tweet_id) as tweet_id,
+              CASE WHEN COALESCE(tip_kind, 'direct_creator_tip') = 'post_tip' THEN 'X post tip' ELSE 'X direct creator tip' END as detail,
               COALESCE(
                 (SELECT profile_image_url FROM verified_claims WHERE author_id = xbt.recipient_x_user_id AND profile_image_url IS NOT NULL ORDER BY verified_at DESC LIMIT 1),
                 (SELECT profile_image_url FROM verified_claims WHERE LOWER(username) = LOWER(COALESCE(xbt.recipient_x_username, '')) AND profile_image_url IS NOT NULL ORDER BY verified_at DESC LIMIT 1)

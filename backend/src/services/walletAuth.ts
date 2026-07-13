@@ -13,6 +13,7 @@ const allowedPurposes = new Set([
   "referral-set-referrer",
   "account-settings",
   "activity-write",
+  "funding",
   "supporter-thank",
   "withdrawal",
   "x-tipping-link",

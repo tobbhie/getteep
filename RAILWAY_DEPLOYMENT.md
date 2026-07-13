@@ -7,8 +7,8 @@ Teep is configured for Railway as three services from the same GitHub repo:
 3. X agent worker service using `x-agent/railway.json`.
 
 `@teep/contracts` is not a Railway service. Deploy contracts separately.
-`@teep/extension` is not a Railway service. Build and publish it through the
-Chrome Web Store.
+`@teep/extension` is a retained legacy workspace and is not part of the primary
+Railway deployment path.
 
 ## Backend API Service
 
@@ -95,7 +95,6 @@ NODE_ENV=production
 VITE_API_URL=https://YOUR_BACKEND_DOMAIN
 VITE_WEB_APP_URL=https://YOUR_WEB_DOMAIN
 VITE_RECEIPT_BASE_URL=https://YOUR_WEB_DOMAIN
-VITE_CHROME_STORE_URL=https://chromewebstore.google.com/detail/teep/REAL_EXTENSION_ID
 VITE_PRIVY_APP_ID=...
 VITE_USDC_ADDRESS=0x3600000000000000000000000000000000000000
 VITE_FACTORY_ADDRESS=...

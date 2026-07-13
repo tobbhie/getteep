@@ -9,7 +9,7 @@ type RawTweet = {
   referenced_tweets?: Array<{ type: string; id: string }>;
 };
 
-type RawUser = { id: string; username: string };
+type RawUser = { id: string; username: string; name?: string; profile_image_url?: string };
 
 type MentionsResponse = {
   data?: RawTweet[];
@@ -62,10 +62,14 @@ function toIncomingPost(tweet: RawTweet, users: Map<string, RawUser>, refTweets:
     text: tweet.text,
     authorId: tweet.author_id,
     authorUsername: author?.username,
+    authorName: author?.name,
+    authorProfileImageUrl: author?.profile_image_url,
     conversationId: tweet.conversation_id,
     parentTweetId: parent?.id,
     parentAuthorId: parent?.author_id,
     parentAuthorUsername: parentAuthor?.username,
+    parentAuthorName: parentAuthor?.name,
+    parentAuthorProfileImageUrl: parentAuthor?.profile_image_url,
   };
 }
 
@@ -74,7 +78,7 @@ export async function fetchRecentMentions(sinceId?: string): Promise<XIncomingPo
     max_results: String(Math.min(Math.max(config.mentionsPageSize, 5), 100)),
     "tweet.fields": "author_id,conversation_id,referenced_tweets",
     expansions: "author_id,referenced_tweets.id,referenced_tweets.id.author_id",
-    "user.fields": "username",
+    "user.fields": "username,name,profile_image_url",
   });
   if (sinceId) params.set("since_id", sinceId);
 

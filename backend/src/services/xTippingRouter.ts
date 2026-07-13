@@ -26,6 +26,15 @@ export function buildXCommandId(sourceTweetId: string): Hex {
   return keccak256(toBytes(`teep:x-command:${sourceTweetId}`));
 }
 
+export function buildXDirectCreatorContentId(recipientXUserId: string): Hex {
+  return keccak256(toBytes(`teep:direct:x:${recipientXUserId}`));
+}
+
+export function buildXPostContentId(authorHandle: string, tweetId: string): Hex {
+  const handle = authorHandle.replace(/^@/, "").toLowerCase();
+  return keccak256(toBytes(`x.com/${handle}/status/${tweetId}`));
+}
+
 export function buildXContentId(recipientXUserId: string, sourceTweetId: string): Hex {
   return keccak256(toBytes(`teep:x-tip:${recipientXUserId}:${sourceTweetId}`));
 }
@@ -105,7 +114,8 @@ export async function computeClaimWallet(authorId: string): Promise<`0x${string}
 export async function relayXTip(params: {
   senderAddress: string;
   recipientXUserId: string;
-  sourceTweetId: string;
+  commandTweetId: string;
+  contentId: Hex;
   amountRaw: bigint;
 }) {
   const routerAddress = getXTippingRouterAddress();
@@ -121,8 +131,8 @@ export async function relayXTip(params: {
   });
   const publicClient = createBackendPublicClient();
 
-  const commandId = buildXCommandId(params.sourceTweetId);
-  const contentId = buildXContentId(params.recipientXUserId, params.sourceTweetId);
+  const commandId = buildXCommandId(params.commandTweetId);
+  const contentId = params.contentId;
   const authorId = BigInt(params.recipientXUserId);
 
   const txHash = await walletClient.writeContract({

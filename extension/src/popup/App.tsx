@@ -1745,8 +1745,9 @@ return (
                 <button
                   type="button"
                   onClick={() => {
-                    if (fundingPolicy.providers.fiatOnramp.enabled && fundingPolicy.providers.fiatOnramp.url) {
-                      window.open(fundingPolicy.providers.fiatOnramp.url, "_blank", "noopener,noreferrer");
+                    if (fundingPolicy.providers.fiatOnramp.enabled) {
+                      const fundingUrl = `${CONFIG.WEB_APP_URL}/fund?provider=crossmint`;
+                      window.open(fundingUrl, "_blank", "noopener,noreferrer");
                       return;
                     }
                     setFaucetMsg(fundingPolicy.providers.fiatOnramp.disabledReason || "Card and bank funding is not available yet.");

@@ -1103,8 +1103,13 @@ router.get("/creators/:username", async (req: Request, res: Response) => {
               xbt.tx_hash,
               CAST(xbt.created_at / 1000 AS INTEGER) as timestamp,
               xbt.sender_address as from_addr,
-              xbt.recipient_x_username as author_handle,
-              xbt.source_tweet_id as tweet_id
+              CASE
+                WHEN COALESCE(xbt.tip_kind, 'direct_creator_tip') = 'post_tip'
+                  THEN COALESCE(xbt.context_author_username, xbt.recipient_x_username)
+                ELSE xbt.recipient_x_username
+              END as author_handle,
+              xbt.context_author_username as tweet_author_handle,
+              COALESCE(xbt.context_tweet_id, xbt.source_tweet_id) as tweet_id
        FROM x_bot_tips xbt
        WHERE xbt.status = 'completed'
          AND (xbt.recipient_x_user_id = ? OR LOWER(COALESCE(xbt.recipient_x_username, '')) = LOWER(?))

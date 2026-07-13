@@ -7,10 +7,69 @@ function envValue(name: string, fallback = ""): string {
   return (process.env[name] || fallback).trim();
 }
 
-const X_CLIENT_ID = envValue("X_CLIENT_ID");
-const X_CLIENT_SECRET = envValue("X_CLIENT_SECRET");
-const X_REDIRECT_URI = envValue("X_REDIRECT_URI", "http://localhost:3001/auth/x/callback");
-const X_BEARER_TOKEN = envValue("X_BEARER_TOKEN");
+const X_AUTH_CLIENT_ID = envValue("X_AUTH_CLIENT_ID", envValue("X_CLIENT_ID"));
+const X_AUTH_CLIENT_SECRET = envValue("X_AUTH_CLIENT_SECRET", envValue("X_CLIENT_SECRET"));
+const X_AUTH_REDIRECT_URI = envValue(
+  "X_AUTH_REDIRECT_URI",
+  envValue("X_REDIRECT_URI", "http://localhost:3001/auth/x/callback")
+);
+const X_AUTH_BEARER_TOKEN = envValue("X_AUTH_BEARER_TOKEN", envValue("X_BEARER_TOKEN"));
+const X_AUTH_CLIENT_AUTH = envValue(
+  "X_AUTH_CLIENT_AUTH",
+  envValue("X_OAUTH_CLIENT_AUTH", "auto")
+).toLowerCase();
+
+type XOAuthClientAuthMode = "auto" | "basic" | "none";
+type XTokenExchangeMode = "basic" | "none";
+
+function oauthClientAuthMode(): XOAuthClientAuthMode {
+  if (X_AUTH_CLIENT_AUTH === "basic" || X_AUTH_CLIENT_AUTH === "none") return X_AUTH_CLIENT_AUTH;
+  return "auto";
+}
+
+function tokenExchangeAttempts(): XTokenExchangeMode[] {
+  const mode = oauthClientAuthMode();
+  if (mode === "basic") return ["basic"];
+  if (mode === "none") return ["none"];
+  return X_AUTH_CLIENT_SECRET ? ["basic", "none"] : ["none"];
+}
+
+function buildTokenRequestBody(code: string, codeVerifier: string, mode: XTokenExchangeMode): URLSearchParams {
+  const body = new URLSearchParams({
+    code,
+    grant_type: "authorization_code",
+    redirect_uri: X_AUTH_REDIRECT_URI,
+    code_verifier: codeVerifier,
+  });
+
+  // PKCE/public-client token exchange authenticates the client through client_id + code_verifier.
+  if (mode === "none") {
+    body.set("client_id", X_AUTH_CLIENT_ID);
+  }
+
+  return body;
+}
+
+function buildTokenRequestHeaders(mode: XTokenExchangeMode): Record<string, string> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/x-www-form-urlencoded",
+  };
+
+  if (mode === "basic") {
+    if (!X_AUTH_CLIENT_ID || !X_AUTH_CLIENT_SECRET) {
+      throw new Error("X OAuth basic client auth requires X_AUTH_CLIENT_ID and X_AUTH_CLIENT_SECRET.");
+    }
+    headers.Authorization = `Basic ${Buffer.from(`${X_AUTH_CLIENT_ID}:${X_AUTH_CLIENT_SECRET}`).toString("base64")}`;
+  }
+
+  return headers;
+}
+
+function shouldRetryWithoutClientSecret(status: number, errorBody: string): boolean {
+  if (oauthClientAuthMode() !== "auto") return false;
+  if (![400, 401].includes(status)) return false;
+  return /unauthorized_client|authorization header|client authentication|invalid client|public client/i.test(errorBody);
+}
 
 export interface XUserProfile {
   id: string;       // numeric user ID
@@ -29,8 +88,8 @@ export class XOAuthService {
   getAuthUrl(state: string, codeChallenge: string): string {
     const params = new URLSearchParams({
       response_type: "code",
-      client_id: X_CLIENT_ID,
-      redirect_uri: X_REDIRECT_URI,
+      client_id: X_AUTH_CLIENT_ID,
+      redirect_uri: X_AUTH_REDIRECT_URI,
       scope: "tweet.read users.read",
       state,
       code_challenge: codeChallenge,
@@ -45,26 +104,34 @@ export class XOAuthService {
    */
   async verifyAndGetProfile(code: string, codeVerifier: string): Promise<XUserProfile> {
     // Exchange code for access token
-    const tokenResponse = await fetch("https://api.twitter.com/2/oauth2/token", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Authorization: `Basic ${Buffer.from(`${X_CLIENT_ID}:${X_CLIENT_SECRET}`).toString("base64")}`,
-      },
-      body: new URLSearchParams({
-        code,
-        grant_type: "authorization_code",
-        redirect_uri: X_REDIRECT_URI,
-        code_verifier: codeVerifier,
-      }),
-    });
+    let tokenData: { access_token: string } | null = null;
+    const exchangeErrors: string[] = [];
 
-    if (!tokenResponse.ok) {
+    for (const mode of tokenExchangeAttempts()) {
+      const tokenResponse = await fetch("https://api.twitter.com/2/oauth2/token", {
+        method: "POST",
+        headers: buildTokenRequestHeaders(mode),
+        body: buildTokenRequestBody(code, codeVerifier, mode),
+      });
+
+      if (tokenResponse.ok) {
+        tokenData = (await tokenResponse.json()) as { access_token: string };
+        break;
+      }
+
       const errorBody = await tokenResponse.text();
-      throw new Error(`X OAuth token exchange failed: ${tokenResponse.status} ${errorBody}`);
+      exchangeErrors.push(`${mode}: ${tokenResponse.status} ${errorBody}`);
+
+      if (mode === "basic" && shouldRetryWithoutClientSecret(tokenResponse.status, errorBody)) {
+        continue;
+      }
+
+      break;
     }
 
-    const tokenData = (await tokenResponse.json()) as { access_token: string };
+    if (!tokenData?.access_token) {
+      throw new Error(`X OAuth token exchange failed: ${exchangeErrors.join("; ")}`);
+    }
 
     // Fetch user profile (user.fields=profile_image_url for avatar)
     const userResponse = await fetch(
@@ -97,8 +164,8 @@ export class XOAuthService {
    * Resolve a public X handle to X's stable numeric user ID.
    */
   async getUserByUsername(username: string): Promise<XUserProfile> {
-    if (!X_BEARER_TOKEN) {
-      throw new Error("X_BEARER_TOKEN not configured");
+    if (!X_AUTH_BEARER_TOKEN) {
+      throw new Error("X_AUTH_BEARER_TOKEN not configured");
     }
 
     const handle = username.replace(/^@/, "").toLowerCase();
@@ -128,7 +195,7 @@ export class XOAuthService {
       try {
         const response = await fetch(`https://${host}${urlPath}`, {
           headers: {
-            Authorization: `Bearer ${X_BEARER_TOKEN}`,
+            Authorization: `Bearer ${X_AUTH_BEARER_TOKEN}`,
           },
           signal: AbortSignal.timeout(10_000),
         });

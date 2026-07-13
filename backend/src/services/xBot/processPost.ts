@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import type { Hex } from "viem";
 import { getDb } from "../../db/database";
 import { XOAuthService } from "../oauth";
 import {
@@ -7,7 +8,13 @@ import {
   getDefaultChainId,
   getDefaultTokenAddress,
 } from "../teepBalance";
-import { getOnchainTeepBalance, getOnchainXTippingReadiness, relayXTip } from "../xTippingRouter";
+import {
+  buildXDirectCreatorContentId,
+  buildXPostContentId,
+  getOnchainTeepBalance,
+  getOnchainXTippingReadiness,
+  relayXTip,
+} from "../xTippingRouter";
 import { amountToRaw, classifyIgnoredMention, formatUsdcRaw, parseTipCommand } from "./parseTipCommand";
 import {
   buildBalanceReply,
@@ -20,7 +27,7 @@ import {
   buildInsufficientBalanceReply,
   buildSuccessReply,
 } from "./replies";
-import type { ProcessPostResult, TipIntent, XIncomingPost } from "./types";
+import type { ProcessPostResult, TipIntent, XIncomingPost, XTipKind } from "./types";
 
 const MIN_TIP_RAW = BigInt(process.env.X_BOT_MIN_TIP_RAW || "10000");
 const PROCESSING_STALE_MS = Number(process.env.X_BOT_PROCESSING_STALE_MS || "300000");
@@ -45,6 +52,13 @@ type PreparedTip = {
   receiptId: string;
   tipId: string;
   sourceTweetId: string;
+  tipKind: XTipKind;
+  contentId: Hex;
+  contextTweetId: string;
+  contextAuthorId: string;
+  contextAuthorUsername: string;
+  contextAuthorName?: string | null;
+  contextAuthorProfileImageUrl?: string | null;
 };
 
 function dbBool(value: unknown) {
@@ -272,6 +286,38 @@ function sourceTweetIdFor(postId: string, index: number, count: number) {
   return count === 1 ? postId : `${postId}:${index + 1}`;
 }
 
+function getTipContext(params: {
+  intent: TipIntent;
+  post: XIncomingPost;
+  recipient: RecipientAccount;
+  sender: SenderAccount;
+}): Omit<PreparedTip, "intent" | "amountRaw" | "recipient" | "receiptId" | "tipId" | "sourceTweetId"> | null {
+  if (params.intent.targetType === "post") {
+    if (!params.post.parentTweetId || !params.post.parentAuthorId || !params.post.parentAuthorUsername) {
+      return null;
+    }
+    return {
+      tipKind: "post_tip",
+      contentId: buildXPostContentId(params.post.parentAuthorUsername, params.post.parentTweetId),
+      contextTweetId: params.post.parentTweetId,
+      contextAuthorId: params.post.parentAuthorId,
+      contextAuthorUsername: params.post.parentAuthorUsername,
+      contextAuthorName: params.post.parentAuthorName ?? null,
+      contextAuthorProfileImageUrl: params.post.parentAuthorProfileImageUrl ?? null,
+    };
+  }
+
+  return {
+    tipKind: "direct_creator_tip",
+    contentId: buildXDirectCreatorContentId(params.recipient.xUserId),
+    contextTweetId: params.post.id,
+    contextAuthorId: params.post.authorId,
+    contextAuthorUsername: params.post.authorUsername || params.sender.xUsername,
+    contextAuthorName: params.post.authorName ?? null,
+    contextAuthorProfileImageUrl: params.post.authorProfileImageUrl ?? null,
+  };
+}
+
 function firstIntentContext(post: XIncomingPost, intent?: TipIntent) {
   return {
     tweetId: post.id,
@@ -371,6 +417,12 @@ export async function processIncomingPost(post: XIncomingPost): Promise<ProcessP
   const prepared: PreparedTip[] = [];
   for (let index = 0; index < command.tips.length; index += 1) {
     const intent = command.tips[index];
+    if (intent.targetType === "post" && (!post.parentTweetId || !post.parentAuthorId || !post.parentAuthorUsername)) {
+      const replyText = buildFailureReply("Reply to the post you want to tip, then use @teepagent tip this post $2.");
+      await markProcessed(post.id, post.authorId, "failed", "MISSING_POST_CONTEXT");
+      return { tweetId: post.id, status: "failed", code: "MISSING_POST_CONTEXT", replyText };
+    }
+
     const recipient = await resolveRecipient(intent, post);
     if (!recipient) {
       const replyText = buildFailureReply("I couldn't find that creator on X.");
@@ -383,6 +435,13 @@ export async function processIncomingPost(post: XIncomingPost): Promise<ProcessP
       return { tweetId: post.id, status: "failed", code: "SELF_TIP", replyText };
     }
 
+    const context = getTipContext({ intent, post, recipient, sender });
+    if (!context) {
+      const replyText = buildFailureReply("I couldn't identify the post to tip.");
+      await markProcessed(post.id, post.authorId, "failed", "MISSING_POST_CONTEXT");
+      return { tweetId: post.id, status: "failed", code: "MISSING_POST_CONTEXT", replyText };
+    }
+
     prepared.push({
       intent,
       amountRaw: amountsRaw[index],
@@ -390,16 +449,18 @@ export async function processIncomingPost(post: XIncomingPost): Promise<ProcessP
       receiptId: createReceiptId(),
       tipId: crypto.randomUUID(),
       sourceTweetId: sourceTweetIdFor(post.id, index, command.tips.length),
+      ...context,
     });
   }
 
   try {
-    const relayed: Array<PreparedTip & { txHash: string; claimWallet: string; contentId: string }> = [];
+    const relayed: Array<PreparedTip & { txHash: string; claimWallet: string; contentId: Hex }> = [];
     for (const tip of prepared) {
       const result = await relayXTip({
         senderAddress: sender.userAddress,
         recipientXUserId: tip.recipient.xUserId,
-        sourceTweetId: tip.sourceTweetId,
+        commandTweetId: tip.sourceTweetId,
+        contentId: tip.contentId,
         amountRaw: tip.amountRaw,
       });
       relayed.push({ ...tip, txHash: result.txHash, claimWallet: result.claimWallet, contentId: result.contentId });
@@ -409,20 +470,29 @@ export async function processIncomingPost(post: XIncomingPost): Promise<ProcessP
       for (const tip of relayed) {
         await txDb.prepare(
           `INSERT INTO tip_metadata (content_id, author_handle, tweet_id, kind)
-           VALUES (?, ?, ?, 'x_bot_tip')
+           VALUES (?, ?, ?, ?)
            ON CONFLICT(content_id) DO UPDATE SET
              author_handle = excluded.author_handle,
              tweet_id = excluded.tweet_id,
              kind = excluded.kind`
-        ).run(tip.contentId, tip.recipient.xUsername, tip.sourceTweetId);
+        ).run(tip.contentId, tip.contextAuthorUsername, tip.contextTweetId, tip.tipKind);
         await txDb.prepare(
           `INSERT INTO x_bot_tips (
             id, sender_address, recipient_address, recipient_x_user_id, recipient_x_username,
-            token_address, amount_raw, source_tweet_id, receipt_id, tx_hash, status, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?)
+            token_address, amount_raw, source_tweet_id, receipt_id, tx_hash, status, created_at,
+            tip_kind, content_id, context_tweet_id, context_author_id, context_author_username,
+            context_author_name, context_author_profile_image_url
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(source_tweet_id) DO UPDATE SET
             tx_hash = excluded.tx_hash,
-            status = excluded.status`
+            status = excluded.status,
+            tip_kind = excluded.tip_kind,
+            content_id = excluded.content_id,
+            context_tweet_id = excluded.context_tweet_id,
+            context_author_id = excluded.context_author_id,
+            context_author_username = excluded.context_author_username,
+            context_author_name = excluded.context_author_name,
+            context_author_profile_image_url = excluded.context_author_profile_image_url`
         ).run(
           tip.tipId,
           sender.userAddress,
@@ -434,7 +504,14 @@ export async function processIncomingPost(post: XIncomingPost): Promise<ProcessP
           tip.sourceTweetId,
           tip.receiptId,
           tip.txHash,
-          nowMs()
+          nowMs(),
+          tip.tipKind,
+          tip.contentId,
+          tip.contextTweetId,
+          tip.contextAuthorId,
+          tip.contextAuthorUsername,
+          tip.contextAuthorName ?? null,
+          tip.contextAuthorProfileImageUrl ?? null
         );
       }
     })();

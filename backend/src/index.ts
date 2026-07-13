@@ -21,6 +21,7 @@ import leaderboardRouter from "./routes/leaderboard";
 import apiV1Router from "./routes/api-v1";
 import opsRouter from "./routes/ops";
 import defiRouter from "./routes/defi";
+import crossmintRouter from "./routes/crossmint";
 import xBotInternalRouter from "./routes/x-bot-internal";
 import xBalanceRouter from "./routes/x-balance";
 import { mountWebProfileRenderer } from "./services/webProfileRenderer";
@@ -81,13 +82,17 @@ const corsOptions: CorsOptions = {
 function assertProductionEnv() {
   if (process.env.NODE_ENV !== "production") return;
 
+  const xOAuthClientAuth = (process.env.X_AUTH_CLIENT_AUTH || process.env.X_OAUTH_CLIENT_AUTH || "auto").trim().toLowerCase();
+  if (!["auto", "basic", "none"].includes(xOAuthClientAuth)) {
+    throw new Error("Production backend has invalid X_AUTH_CLIENT_AUTH. Use auto, basic, or none.");
+  }
+  const hasAnyEnv = (keys: string[]) => keys.some((key) => Boolean(process.env[key]));
+  const missingAnyEnv = (label: string, keys: string[]) => (hasAnyEnv(keys) ? null : `${label} (${keys.join(" or ")})`);
+
   const required = [
     "WEB_APP_URL",
     "RECEIPT_BASE_URL",
     "ATTESTATION_PRIVATE_KEY",
-    "X_CLIENT_ID",
-    "X_CLIENT_SECRET",
-    "X_BEARER_TOKEN",
     "PROTOCOL_TREASURY_ADDRESS",
     "USDC_ADDRESS",
     "TIP_CONTRACT_ADDRESS",
@@ -96,7 +101,14 @@ function assertProductionEnv() {
   ];
   if (!process.env.RPC_URL && !process.env.ARC_RPC_URL) required.push("RPC_URL");
 
-  const missing = required.filter((key) => !process.env[key]);
+  const missing = [
+    ...required.filter((key) => !process.env[key]),
+    missingAnyEnv("X auth client id", ["X_AUTH_CLIENT_ID", "X_CLIENT_ID"]),
+    missingAnyEnv("X auth bearer token", ["X_AUTH_BEARER_TOKEN", "X_BEARER_TOKEN"]),
+    xOAuthClientAuth === "none"
+      ? null
+      : missingAnyEnv("X auth client secret", ["X_AUTH_CLIENT_SECRET", "X_CLIENT_SECRET"]),
+  ].filter(Boolean) as string[];
   if (missing.length) {
     throw new Error(`Production backend is missing required env: ${missing.join(", ")}`);
   }
@@ -110,24 +122,25 @@ function assertProductionEnv() {
       throw new Error(`Production backend cannot use a localhost ${key}.`);
     }
   }
-  if (!process.env.X_REDIRECT_URI) {
-    throw new Error("Production backend requires X_REDIRECT_URI.");
+  const xRedirectUri = process.env.X_AUTH_REDIRECT_URI || process.env.X_REDIRECT_URI;
+  if (!xRedirectUri) {
+    throw new Error("Production backend requires X_AUTH_REDIRECT_URI.");
   }
   try {
-    const redirectUrl = new URL(process.env.X_REDIRECT_URI);
+    const redirectUrl = new URL(xRedirectUri);
     const webUrl = new URL(process.env.WEB_APP_URL!);
     if (redirectUrl.protocol !== "https:") {
-      throw new Error("Production X_REDIRECT_URI must use https.");
+      throw new Error("Production X_AUTH_REDIRECT_URI must use https.");
     }
     if (redirectUrl.origin === webUrl.origin) {
-      throw new Error("Production X_REDIRECT_URI must point to the backend/API origin, not the web frontend origin.");
+      throw new Error("Production X_AUTH_REDIRECT_URI must point to the backend/API origin, not the web frontend origin.");
     }
     if (redirectUrl.pathname !== "/auth/x/callback") {
-      throw new Error("Production X_REDIRECT_URI must end with /auth/x/callback.");
+      throw new Error("Production X_AUTH_REDIRECT_URI must end with /auth/x/callback.");
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "invalid URL";
-    throw new Error(`Production backend has an invalid X_REDIRECT_URI: ${message}`);
+    throw new Error(`Production backend has an invalid X_AUTH_REDIRECT_URI: ${message}`);
   }
   if (process.env.ENABLE_FAUCET === "true") {
     throw new Error("Production backend cannot enable ENABLE_FAUCET.");
@@ -156,6 +169,30 @@ function assertProductionEnv() {
   }
   if (process.env.WITHDRAWAL_REQUIRE_EMAIL_CONFIRMATION !== "false" && !process.env.WITHDRAWAL_EMAIL_WEBHOOK_URL) {
     throw new Error("Production backend requires WITHDRAWAL_EMAIL_WEBHOOK_URL when withdrawal email confirmation is enabled.");
+  }
+  const crossmintEnabled = process.env.CROSSMINT_ENABLE_ONRAMP === "true" || process.env.CROSSMINT_ENABLE_OFFRAMP === "true";
+  if (crossmintEnabled) {
+    if (!process.env.CROSSMINT_SERVER_API_KEY) {
+      throw new Error("Production Crossmint staging requires CROSSMINT_SERVER_API_KEY.");
+    }
+    if (process.env.CROSSMINT_ENV === "production" && process.env.CROSSMINT_ALLOW_PRODUCTION !== "true") {
+      throw new Error("Crossmint production is blocked until CROSSMINT_ALLOW_PRODUCTION=true.");
+    }
+    if ((process.env.CROSSMINT_ENV || "staging") === "staging") {
+      const baseUrl = process.env.CROSSMINT_API_BASE_URL || "https://staging.crossmint.com";
+      try {
+        const parsed = new URL(baseUrl);
+        if (parsed.hostname !== "staging.crossmint.com") {
+          throw new Error("CROSSMINT_ENV=staging must use staging.crossmint.com.");
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "invalid URL";
+        throw new Error(`Production Crossmint staging URL is invalid: ${message}`);
+      }
+    }
+    if (process.env.CROSSMINT_ENABLE_OFFRAMP === "true" && !process.env.CROSSMINT_OFFRAMP_ORDER_BODY_TEMPLATE) {
+      throw new Error("Crossmint off-ramp requires CROSSMINT_OFFRAMP_ORDER_BODY_TEMPLATE.");
+    }
   }
   if (!process.env.OPS_TOKEN) {
     throw new Error("Production backend requires OPS_TOKEN.");
@@ -226,6 +263,7 @@ app.use("/auth", authLimiter, authRouter);
 app.use("/faucet", faucetRouter);
 app.use("/referral", writeLimiter, referralRouter);
 app.use("/withdrawal", withdrawalLimiter, withdrawalRouter);
+app.use("/crossmint", withdrawalLimiter, crossmintRouter);
 app.use("/milestones", milestonesRouter);
 app.use("/profile", profileRouter);
 app.use("/stats", statsRouter);

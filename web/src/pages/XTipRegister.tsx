@@ -136,11 +136,21 @@ export default function XTipRegister() {
   }, [receiptId]);
 
   const recipient = cleanHandle(receipt?.recipientHandle || receipt?.authorHandle) || queryRecipient;
+  const sender = cleanHandle(receipt?.authorHandle);
   const amount = receipt ? formatUsdRaw(receipt.amount) : queryAmount;
   const isTipIntent = intent === "x-tip" && recipient && (amount || receiptId);
   const claimPath = appendParams("/dashboard?claim=creator", searchParams);
   const avatarSrc = xAvatarUrl(recipient) || localInitialsAvatar(recipient);
-  const headline = amount ? `$${amount} is reserved for @${recipient}` : `A tip is reserved for @${recipient}`;
+  const headline = amount ? (
+    <>
+      A <span className="x-tip-link-amount">${amount}</span> tip is waiting for{" "}
+      <span className="x-tip-link-handle">@{recipient}</span>
+    </>
+  ) : (
+    <>
+      A tip is waiting for <span className="x-tip-link-handle">@{recipient}</span>
+    </>
+  );
   const hasReceiptSource = Boolean(receipt);
 
   useEffect(() => {
@@ -202,43 +212,52 @@ export default function XTipRegister() {
     );
   }
 
-  const intro = !authenticated
-    ? `Continue with Teep, then connect @${recipient} on X to claim this tip.`
-    : linkedRecipient
-      ? `You are signed in as ${signedInName}. Finish the claim flow to make this tip available.`
-      : `You are signed in as ${signedInName}. This claim link is for @${recipient}. If that is not you, share it with them.`;
+  const intro = "Confirm your X account to move this tip into your Teep balance.";
 
   return (
     <main className="x-tip-link-page">
       <section className="x-tip-link-claim-shell">
         <div className="x-tip-link-claim-copy">
-          <span className="x-tip-link-badge">Tip waiting</span>
-          <img
-            src={avatarSrc}
-            alt=""
-            className="x-tip-link-avatar-img"
-            onError={(event) => avatarErrorFallback(event, recipient)}
-          />
+          <div className="x-tip-link-hero-top">
+            <span className="x-tip-link-badge">Tip waiting</span>
+            <img
+              src={avatarSrc}
+              alt=""
+              className="x-tip-link-avatar-img"
+              onError={(event) => avatarErrorFallback(event, recipient)}
+            />
+          </div>
           <h1>{headline}</h1>
           <p>{intro}</p>
         </div>
 
         <div className="x-tip-link-panel x-tip-link-panel--claim">
+          <p className="x-tip-link-panel-kicker">Claim your tip</p>
+          <h2 className="x-tip-link-panel-title">Confirm @{recipient} on X.</h2>
+
+          <div className="x-tip-link-signed-in" aria-label="Current Teep account">
+            <span>{authenticated ? "Signed in as" : "Sign in to continue"}</span>
+            <strong>{authenticated ? signedInName : "Teep account"}</strong>
+            <button type="button" onClick={login}>{authenticated ? "Switch" : "Sign in"}</button>
+          </div>
+
           <div className="x-tip-link-summary" aria-label="Reserved tip details">
             <div>
               <span>Recipient</span>
               <strong>@{recipient}</strong>
             </div>
             <div>
-              <span>{authenticated ? "Signed in as" : "Claim action"}</span>
-              <strong>{authenticated ? signedInName : "Verify with X"}</strong>
+              <span>Amount</span>
+              <strong>{amount ? `$${amount}` : "Tip waiting"}</strong>
             </div>
-            {amount && (
-              <div>
-                <span>{hasReceiptSource ? "Reserved tip" : "Requested tip"}</span>
-                <strong>${amount}</strong>
-              </div>
-            )}
+            <div>
+              <span>{sender ? "Sent by" : "Source"}</span>
+              <strong>{sender ? `@${sender}` : "Sent via X"}</strong>
+            </div>
+            <div>
+              <span>Status</span>
+              <strong className="x-tip-link-status">Ready to claim</strong>
+            </div>
           </div>
 
           {!hasReceiptSource && (
@@ -250,17 +269,19 @@ export default function XTipRegister() {
           <div className="x-tip-link-actions">
             {authenticated ? (
               <Link to={claimPath} className="btn-primary">
-                {linkedRecipient ? "Finish claim" : "I am this creator"}
+                {linkedRecipient ? "Finish claim" : `Claim as @${recipient}`}
               </Link>
             ) : (
               <button type="button" onClick={login} className="btn-primary">
-                I am this creator
+                Claim as @{recipient}
               </button>
             )}
             <a href={shareUrl} target="_blank" rel="noopener noreferrer" className="btn-secondary">
               Share with @{recipient}
             </a>
           </div>
+
+          <p className="x-tip-link-panel-note">After confirmation, this tip moves into your Teep balance.</p>
         </div>
       </section>
     </main>

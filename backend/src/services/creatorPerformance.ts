@@ -111,7 +111,7 @@ function xPostUrl(authorHandle: string | null, tweetId: string | null) {
 }
 
 function isDirectTip(row: TipRow) {
-  return row.kind === "direct_creator_tip" || row.kind === "x_bot_tip" || !row.tweet_id;
+  return row.kind === "direct_creator_tip" || !row.tweet_id;
 }
 
 function previousWindow(startAt: number | null, endAt: number, days: number | null) {
@@ -228,7 +228,7 @@ export async function getCreatorPerformance(
   const xBotRows = await db
     .prepare(
       `SELECT
-          xbt.source_tweet_id as content_id,
+          COALESCE(xbt.content_id, xbt.source_tweet_id) as content_id,
           xbt.recipient_x_user_id as author_id,
           xbt.sender_address as from_address,
           xbt.recipient_address as to_address,
@@ -237,9 +237,13 @@ export async function getCreatorPerformance(
           0 as block_number,
           0 as log_index,
           CAST(xbt.created_at / 1000 AS INTEGER) as timestamp,
-          xbt.recipient_x_username as author_handle,
-          xbt.source_tweet_id as tweet_id,
-          'x_bot_tip' as kind
+          CASE
+            WHEN COALESCE(xbt.tip_kind, 'direct_creator_tip') = 'post_tip'
+              THEN COALESCE(xbt.context_author_username, xbt.recipient_x_username)
+            ELSE xbt.recipient_x_username
+          END as author_handle,
+          COALESCE(xbt.context_tweet_id, xbt.source_tweet_id) as tweet_id,
+          COALESCE(xbt.tip_kind, 'direct_creator_tip') as kind
        FROM x_bot_tips xbt
        WHERE xbt.status = 'completed'
          AND (xbt.recipient_x_user_id = ? OR LOWER(COALESCE(xbt.recipient_x_username, '')) = LOWER(?))

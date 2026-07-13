@@ -22,6 +22,13 @@ type XBotTipReceiptRow = {
   receipt_id: string;
   tx_hash: string | null;
   created_at: number;
+  tip_kind?: string | null;
+  content_id?: string | null;
+  context_tweet_id?: string | null;
+  context_author_id?: string | null;
+  context_author_username?: string | null;
+  context_author_name?: string | null;
+  context_author_profile_image_url?: string | null;
 };
 
 type ClaimableTipReceiptRow = {
@@ -132,11 +139,22 @@ async function buildXBotReceiptPayload(db: ReturnType<typeof getDb>, row: XBotTi
     senderXHandle(db, row.sender_address),
     resolveCreatorClaimState(db, row.recipient_x_user_id, row.recipient_x_username),
   ]);
+  const kind = row.tip_kind === "post_tip" ? "post_tip" : "direct_creator_tip";
   const recipientHandle = creatorState.recipientHandle || normalizeReceiptHandle(row.recipient_x_username);
-  const tweetAuthorHandle = senderHandle || normalizeReceiptHandle(senderIdentity.label) || null;
+  const fallbackTweetAuthor =
+    kind === "post_tip"
+      ? recipientHandle
+      : senderHandle || normalizeReceiptHandle(senderIdentity.label);
+  const tweetAuthorHandle = normalizeReceiptHandle(row.context_author_username) || fallbackTweetAuthor || null;
+  const tweetId = row.context_tweet_id || row.source_tweet_id;
+  const contentId =
+    row.content_id ||
+    (kind === "post_tip" && tweetAuthorHandle
+      ? contentIdFromPost(tweetAuthorHandle, tweetId)
+      : contentIdFromDirectCreator(row.recipient_x_user_id));
 
   return {
-    kind: "direct_creator_tip",
+    kind,
     receiptId: row.receipt_id,
     fromAddress: senderSettings.privacy.hideAddress ? null : row.sender_address,
     fromIdentity: senderIdentity.label,
@@ -146,11 +164,13 @@ async function buildXBotReceiptPayload(db: ReturnType<typeof getDb>, row: XBotTi
     txHash: row.tx_hash,
     timestamp: Math.floor(Number(row.created_at || 0) / 1000),
     authorId: row.recipient_x_user_id,
-    contentId: contentIdFromDirectCreator(row.recipient_x_user_id),
+    contentId,
     authorHandle: recipientHandle,
     recipientHandle,
     tweetAuthorHandle,
-    tweetId: row.source_tweet_id,
+    tweetAuthorName: row.context_author_name || null,
+    tweetAuthorProfileImageUrl: row.context_author_profile_image_url || null,
+    tweetId,
     source: "x_bot",
     status: "completed",
     creatorClaimStatus: creatorState.creatorClaimStatus,
@@ -317,7 +337,11 @@ router.get("/receipt/x/:receiptId", async (req: Request, res: Response) => {
   const db = getDb();
   const row = await db
     .prepare(
-      `SELECT sender_address, recipient_address, recipient_x_user_id, recipient_x_username, amount_raw, source_tweet_id, receipt_id, tx_hash, created_at
+      `SELECT sender_address, recipient_address, recipient_x_user_id, recipient_x_username,
+              amount_raw, source_tweet_id, receipt_id, tx_hash, created_at,
+              COALESCE(tip_kind, 'direct_creator_tip') as tip_kind,
+              content_id, context_tweet_id, context_author_id, context_author_username,
+              context_author_name, context_author_profile_image_url
        FROM x_bot_tips WHERE receipt_id = ?`
     )
     .get(receiptId) as XBotTipReceiptRow | undefined;
@@ -357,7 +381,10 @@ router.get("/receipt/:txHash", async (req: Request, res: Response) => {
   const xBotTip = await db
     .prepare(
       `SELECT sender_address, recipient_address, recipient_x_user_id, recipient_x_username,
-              amount_raw, source_tweet_id, receipt_id, tx_hash, created_at
+              amount_raw, source_tweet_id, receipt_id, tx_hash, created_at,
+              COALESCE(tip_kind, 'direct_creator_tip') as tip_kind,
+              content_id, context_tweet_id, context_author_id, context_author_username,
+              context_author_name, context_author_profile_image_url
        FROM x_bot_tips
        WHERE LOWER(tx_hash) = ?
        LIMIT 1`
@@ -641,14 +668,15 @@ router.get("/wallet/:address", async (req: Request, res: Response) => {
 
   const xBotTips = await db
     .prepare(
-      `SELECT NULL as content_id,
+      `SELECT xbt.content_id as content_id,
               xbt.recipient_x_user_id as author_id,
               xbt.amount_raw as amount,
               xbt.tx_hash,
               CAST(xbt.created_at / 1000 AS INTEGER) as timestamp,
               xbt.recipient_x_username as author_handle,
-              xbt.source_tweet_id as tweet_id,
-              'x_bot_tip' as kind,
+              xbt.context_author_username as tweet_author_handle,
+              COALESCE(xbt.context_tweet_id, xbt.source_tweet_id) as tweet_id,
+              COALESCE(xbt.tip_kind, 'direct_creator_tip') as kind,
               'x_bot' as source
        FROM x_bot_tips xbt
        WHERE LOWER(xbt.sender_address) = ?
@@ -667,6 +695,7 @@ router.get("/wallet/:address", async (req: Request, res: Response) => {
       tx_hash: string;
       timestamp: number;
       author_handle: string | null;
+      tweet_author_handle: string | null;
       tweet_id: string;
       kind: string;
       source: string;

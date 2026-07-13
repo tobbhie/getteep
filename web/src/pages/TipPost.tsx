@@ -4,7 +4,7 @@ import { useCreateWallet, usePrivy, useWallets } from "@privy-io/react-auth";
 import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
 import { parseUnits } from "viem";
 import { arcTestnet } from "../chains";
-import { API_BASE, CHROME_STORE_URL, HAS_CHROME_STORE_LISTING, USDC_ADDRESS } from "../config";
+import { API_BASE, USDC_ADDRESS } from "../config";
 import { computeContentId, encodeApproveCall, encodeTipCall, TIP_CONTRACT_ADDRESS } from "../lib/contracts";
 import ConfirmTipModal from "../components/ConfirmTipModal";
 import Icon from "../components/Icon";
@@ -305,8 +305,6 @@ export default function TipPost() {
   const avatarUrl = xAvatarUrl(cleanHandle) || "/logo.svg";
   const total = money(postData?.totalAmount);
   const tipCount = postData?.tipCount ?? 0;
-  const extensionTarget = HAS_CHROME_STORE_LISTING ? "_blank" : undefined;
-
   return (
     <main className="tip-post-page">
       <section className="tip-post-shell" aria-labelledby="tip-post-title">
@@ -350,7 +348,7 @@ export default function TipPost() {
                 </button>
               ))}
             </div>
-            <p id="tip-post-amount-help">Web app tipping works without the browser extension.</p>
+            <p id="tip-post-amount-help">Send from the web app or use an X tip command for this post.</p>
             {pageError ? <p id="tip-post-page-error" className="tip-post-error" role="alert">{pageError}</p> : null}
             {createWalletError ? <p id="tip-post-wallet-error" className="tip-post-error" role="alert">{createWalletError}</p> : null}
 
@@ -385,8 +383,8 @@ export default function TipPost() {
                   View post on X
                 </a>
               ) : null}
-              <a href={CHROME_STORE_URL} target={extensionTarget} rel={HAS_CHROME_STORE_LISTING ? "noopener noreferrer" : undefined}>
-                {HAS_CHROME_STORE_LISTING ? "Add extension" : "Extension beta"}
+              <a href="/dashboard" target="_blank" rel="noopener noreferrer">
+                Open Teep app
               </a>
             </div>
           </div>
