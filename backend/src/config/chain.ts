@@ -35,7 +35,6 @@ export function getConfiguredChain() {
 
 export function getRpcUrl() {
   return (
-    process.env.RPC_URL ||
     process.env.ARC_RPC_URL ||
     process.env.BASE_RPC_URL ||
     getConfiguredChain().rpcUrls.default.http[0]
